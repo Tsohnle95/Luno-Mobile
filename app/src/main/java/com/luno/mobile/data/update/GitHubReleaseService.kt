@@ -40,7 +40,7 @@ open class GitHubReleaseService(
 ) {
     companion object {
         const val DEFAULT_OWNER = "Tsohnle95"
-        const val DEFAULT_REPOSITORY = "musicPlayer"
+        const val DEFAULT_REPOSITORY = "Luno-Mobile"
 
         private const val TIMEOUT_SECONDS = 8L
         private val VERSION_PATTERN = Regex("^v?(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?(?:[-+].*)?$")

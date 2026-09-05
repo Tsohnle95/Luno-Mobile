@@ -2,7 +2,7 @@
 
 Android downloads are published to the repository's GitHub Releases page:
 
-`https://github.com/Tsohnle95/musicPlayer/releases/latest`
+`https://github.com/Tsohnle95/Luno-Mobile/releases/latest`
 
 ## Local Testing
 
@@ -15,7 +15,6 @@ Keep using the existing debug workflow:
 The underlying direct Gradle workflow remains:
 
 ```bash
-cd mobile-app
 ./gradlew installDebug
 ```
 
@@ -67,7 +66,7 @@ git push origin v0.1.0
 
 5. GitHub Actions builds `testDebugUnitTest`, `lintDebug`, and the release APK.
 6. The workflow verifies that the tag matches `versionName` and verifies the APK signature.
-7. A GitHub Release is created automatically with `Luno-Android-v0.1.0.apk` attached.
+7. A GitHub Release is created automatically with `Luno-Mobile-v0.1.0.apk` attached.
 
 The Android app's **Settings → App → Check for updates** entry reads this release tag and finds the attached APK. **Download APK** downloads it into the app cache and opens Android's package installer; the first install may require enabling **Allow Luno to install unknown apps**. Users can also download it directly from the release page.
 

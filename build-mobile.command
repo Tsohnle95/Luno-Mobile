@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ANDROID_DIR="$ROOT_DIR/mobile-app"
+ANDROID_DIR="$ROOT_DIR"
 APK_PATH="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
 if [[ ! -x "$ANDROID_DIR/gradlew" ]]; then

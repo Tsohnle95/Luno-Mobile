@@ -15,9 +15,6 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mobile-app
 
     steps:
       - name: Check out source and NewPipeExtractor
@@ -58,10 +55,10 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
 
       - name: Name release artifact
-        run: cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Luno-Android-${GITHUB_REF_NAME}.apk"
+        run: cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Luno-Mobile-${GITHUB_REF_NAME}.apk"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: mobile-app/app/build/outputs/apk/release/Luno-Android-${{ github.ref_name }}.apk
+          files: app/build/outputs/apk/release/Luno-Mobile-${{ github.ref_name }}.apk

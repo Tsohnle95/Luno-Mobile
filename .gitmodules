@@ -1,0 +1,4 @@
+[submodule "vendor/NewPipeExtractor"]
+path = vendor/NewPipeExtractor
+url = https://github.com/TeamNewPipe/NewPipeExtractor.git
+shallow = true

@@ -10,14 +10,17 @@ Clone with the pinned NewPipeExtractor submodule:
 ```bash
 git clone --recurse-submodules https://github.com/Tsohnle95/Luno-Mobile.git
 cd Luno-Mobile
-./gradlew testDebugUnitTest
-./gradlew lintDebug
-./gradlew assembleDebug
+python3 scripts/verify.py
 ```
 
-The project uses Java 17, the Android SDK configured by Gradle, and keeps the
-application identity `com.luno.mobile`. The NewPipeExtractor submodule is
+The project runs Gradle with Java 17 and needs a Java 11 compiler toolchain for
+the included extractor build. It uses the Android SDK configured by Gradle and
+keeps the application identity `com.luno.mobile`. The NewPipeExtractor submodule is
 pinned to v0.26.4; do not replace it with an unpinned or local-only checkout.
+
+See [development setup and verification](docs/android-development.md) for SDK
+setup, focused checks and device coverage, and [Android releases](ANDROID_RELEASES.md)
+for signing/publishing. Coding agents start at [AGENTS.md](AGENTS.md).
 
 ## Release
 

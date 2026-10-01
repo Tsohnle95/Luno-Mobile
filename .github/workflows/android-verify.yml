@@ -1,0 +1,37 @@
+name: Android Verification
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out source and NewPipeExtractor
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up app and extractor Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # The included extractor compiles with 11; the last JDK runs Gradle.
+          java-version: |
+            11
+            17
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Verify documentation and debug app
+        run: python3 scripts/verify.py

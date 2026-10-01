@@ -15,6 +15,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
 
     steps:
       - name: Check out source and NewPipeExtractor
@@ -22,11 +23,14 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up Java 17
+      - name: Set up app and extractor Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          # The included extractor compiles with 11; the last JDK runs Gradle.
+          java-version: |
+            11
+            17
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -51,7 +55,7 @@ jobs:
           test -n "$ANDROID_RELEASE_STORE_PASSWORD"
           test -n "$ANDROID_RELEASE_KEY_ALIAS"
           test -n "$ANDROID_RELEASE_KEY_PASSWORD"
-          ./gradlew verifyReleaseVersion testDebugUnitTest lintDebug assembleRelease
+          python3 scripts/verify.py --release
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
 
       - name: Name release artifact

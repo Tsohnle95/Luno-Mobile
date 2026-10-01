@@ -32,28 +32,50 @@ import com.luno.mobile.ui.theme.PrimaryText
 
 /**
  * Sort modes shared by the Library and Playlist-detail screens.
- * [RECENT] puts newly added songs at the bottom of a song list. Playlists
- * themselves remain newest-first. [DURATION] is longest-first.
+ * [PLAYLIST_ORDER] preserves saved membership order and is only offered in
+ * playlist detail. [RECENT] puts newly added songs first. Playlists themselves
+ * remain newest-first. [DURATION] is longest-first.
  */
 enum class TrackSortMode(val label: String) {
+    PLAYLIST_ORDER("Playlist order"),
     AZ("A–Z"),
     ZA("Z–A"),
     RECENT("Recently added"),
-    DURATION("Duration")
+    DURATION("Duration");
+
+    companion object {
+        /** Sorting options for library-wide track and playlist views. */
+        val LIBRARY_MODES = entries.filterNot { it == PLAYLIST_ORDER }
+
+        /** Playlist detail also supports its saved membership order. */
+        val PLAYLIST_MODES = entries
+    }
 }
 
 /** Sorts a track list by [mode] (DURATION = longest first). */
 fun List<Track>.sortedByMode(mode: TrackSortMode): List<Track> = when (mode) {
+    TrackSortMode.PLAYLIST_ORDER -> this
     TrackSortMode.AZ -> sortedBy { it.title.lowercase() }
     TrackSortMode.ZA -> sortedByDescending { it.title.lowercase() }
-    TrackSortMode.RECENT -> sortedBy { it.addedAt }
+    TrackSortMode.RECENT -> sortedByDescending { it.addedAt }
     TrackSortMode.DURATION -> sortedByDescending { it.durationMs }
+}
+
+/** Applies the playlist's saved membership order, keeping unknown rows last. */
+fun List<Track>.sortedByPlaylistMembership(trackUris: List<String>): List<Track> {
+    if (trackUris.isEmpty()) return this
+    val order = trackUris.withIndex().associate { (index, uri) -> uri to index }
+    return sortedWith(
+        compareBy<Track> { order[it.uri] ?: Int.MAX_VALUE }
+            .thenByDescending { it.addedAt }
+    )
 }
 
 /** Sorts library playlists using the same dropdown modes as the song list. */
 fun List<PlaylistWithTracks>.sortedPlaylistsByMode(
     mode: TrackSortMode
 ): List<PlaylistWithTracks> = when (mode) {
+    TrackSortMode.PLAYLIST_ORDER -> this
     TrackSortMode.AZ -> sortedBy { it.playlist.name.lowercase() }
     TrackSortMode.ZA -> sortedByDescending { it.playlist.name.lowercase() }
     TrackSortMode.RECENT -> sortedByDescending { it.playlist.createdAt }
@@ -71,7 +93,8 @@ fun List<PlaylistWithTracks>.sortedPlaylistsByMode(
 fun SortChip(
     mode: TrackSortMode,
     onModeChange: (TrackSortMode) -> Unit,
-    compact: Boolean = false
+    compact: Boolean = false,
+    availableModes: List<TrackSortMode> = TrackSortMode.LIBRARY_MODES
 ) {
     var showMenu by remember { mutableStateOf(false) }
     Box {
@@ -114,7 +137,7 @@ fun SortChip(
             expanded = showMenu,
             onDismissRequest = { showMenu = false }
         ) {
-            TrackSortMode.entries.forEach { entry ->
+            availableModes.forEach { entry ->
                 DropdownMenuItem(
                     text = {
                         Text(

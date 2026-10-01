@@ -395,7 +395,8 @@ fun LibraryScreen(
                 SortChip(
                     mode = sortMode,
                     onModeChange = { sortMode = it },
-                    compact = true
+                    compact = true,
+                    availableModes = TrackSortMode.LIBRARY_MODES
                 )
             }
         }

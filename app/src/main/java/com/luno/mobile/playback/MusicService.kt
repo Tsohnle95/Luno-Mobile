@@ -11,7 +11,9 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionResult
 import com.luno.mobile.MainActivity
+import com.luno.mobile.LunoApp
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import java.util.concurrent.Executors
@@ -95,6 +97,22 @@ class MusicService : MediaSessionService() {
      * gets the process LMK/OOM-killed.
      */
     private inner class ArtworkEnrichingCallback : MediaSession.Callback {
+        @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+        override fun onPlayerCommandRequest(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            playerCommand: Int
+        ): Int {
+            if (playerCommand == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM &&
+                (application as? LunoApp)
+                    ?.recommendationPreviewManager
+                    ?.handleSessionNext() == true
+            ) {
+                return SessionResult.RESULT_ERROR_NOT_SUPPORTED
+            }
+            return SessionResult.RESULT_SUCCESS
+        }
+
         @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
         override fun onAddMediaItems(
             mediaSession: MediaSession,

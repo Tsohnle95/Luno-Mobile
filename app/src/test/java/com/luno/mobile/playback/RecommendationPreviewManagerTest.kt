@@ -309,6 +309,39 @@ class RecommendationPreviewManagerTest {
                 discoverStartedUri = null
             )
         ).isFalse()
+
+        assertThat(
+            RecommendationPreviewManager.shouldHandleDiscoverNext(
+                discoverMode = true,
+                handoffPending = true,
+                nextRecommendationAvailable = false,
+                extensionPending = false
+            )
+        ).isTrue()
+        assertThat(
+            RecommendationPreviewManager.shouldHandleDiscoverNext(
+                discoverMode = false,
+                handoffPending = true,
+                nextRecommendationAvailable = true,
+                extensionPending = true
+            )
+        ).isFalse()
+    }
+
+    @Test
+    fun nextDuringDiscoverPageLoad_staysInsideRecommendations() {
+        assertThat(
+            RecommendationPreviewManager.shouldHandleDiscoverNext(
+                discoverMode = true,
+                handoffPending = false,
+                nextRecommendationAvailable = false,
+                extensionPending = true
+            )
+        ).isTrue()
+        assertThat(RecommendationPreviewManager.nextDiscoverRecommendationIndex(0, 3))
+            .isEqualTo(1)
+        assertThat(RecommendationPreviewManager.nextDiscoverRecommendationIndex(2, 3))
+            .isNull()
     }
 
     @Test

@@ -46,7 +46,7 @@ import com.luno.mobile.ui.theme.SecondaryText
 fun MiniPlayer(
     musicController: MusicController,
     onMiniPlayerTap: () -> Unit = {},
-    onNext: () -> Unit = { musicController.skipToNext() },
+    onNext: () -> Unit,
     onPrevious: () -> Unit = { musicController.skipToPrevious() }
 ) {
     val isPlaying by musicController.isPlaying.collectAsState()

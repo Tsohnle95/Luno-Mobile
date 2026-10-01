@@ -149,6 +149,7 @@ fun FullPlayerScreen(
     val context = LocalContext.current
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val app = context.applicationContext as LunoApp
+    fun skipToNext() = app.recommendationPreviewManager.skipToNext()
     val apiKey by app.discoveryRepository.apiKey.collectAsState()
     val allTracks by app.libraryData.tracks.collectAsState()
     val previewState by app.recommendationPreviewManager.state.collectAsState()
@@ -519,7 +520,7 @@ fun FullPlayerScreen(
             onBack = onBack,
             onPrevious = musicController::skipToPrevious,
             onPlayPause = musicController::togglePlayPause,
-            onNext = musicController::skipToNext
+            onNext = ::skipToNext
         )
         return
     }
@@ -810,17 +811,7 @@ fun FullPlayerScreen(
                     )
                 }
                 IconButton(
-                    onClick = {
-                        // Only a transient preview playing needs the manager's
-                        // skip routing; for any normal track the player's own
-                        // skip always advances the queue (into a queued
-                        // recommendation block or past it).
-                        if (currentTrack?.isTransient != true ||
-                            !app.recommendationPreviewManager.skipToNext()
-                        ) {
-                            musicController.skipToNext()
-                        }
-                    },
+                    onClick = ::skipToNext,
                     modifier = Modifier.size(Dimens.touchTargetMin)
                 ) {
                     Icon(

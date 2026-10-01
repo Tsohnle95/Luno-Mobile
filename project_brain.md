@@ -56,7 +56,10 @@ The main flows are:
    audio unexpectedly.
 3. `MusicController` maps Room tracks to Media3 media items, owns queue and
    recent-history policy, and maintains notification/session behavior through
-   the media service.
+   the media service. `RecommendationPreviewManager` owns Next routing for
+   both app controls and MediaSession commands: while Discover has a handoff,
+   recommendation, or page pending, Next stays within that flow before
+   falling back to the physical library queue.
 4. Downloads stage temporary files, validate media, then promote atomically
    into the app library/download area. WorkManager owns durable background work
    and retry state. Startup reconciles active Room download rows against
@@ -74,7 +77,8 @@ The main flows are:
 7. The Settings drawer's artwork quality scan checks cached pixel dimensions,
    tries larger YouTube thumbnails and cover search, and replaces a song's
    cached artwork only when the new image has more pixels. Playlist detail
-   uses membership order for its default chronological song view.
+   uses saved membership order by default, while its explicit Recently added
+   option sorts by each track's library-added time.
 
 ## Repository map
 

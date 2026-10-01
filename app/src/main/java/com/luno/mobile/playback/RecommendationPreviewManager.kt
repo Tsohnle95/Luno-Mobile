@@ -491,28 +491,41 @@ class RecommendationPreviewManager(
                 .orEmpty()
             synchronized(lock) {
                 if (discoverRequestGeneration != requestGeneration) return@launch
-                discoverRequestJob = null
                 if (recommendations.isEmpty()) {
+                    discoverRequestJob = null
                     advanceToDeferredRecommendation = false
                     return@launch
                 }
             }
             withContext(Dispatchers.Main.immediate) {
-                synchronized(lock) {
-                    if (discoverRequestGeneration != requestGeneration ||
-                        !_state.value.discoverMode || _state.value.active ||
+                val canStart = synchronized(lock) {
+                    if (discoverRequestGeneration != requestGeneration) {
+                        false
+                    } else if (!_state.value.discoverMode || _state.value.active ||
                         musicController?.currentTrack?.value?.uri != track.uri
                     ) {
-                        return@withContext
+                        discoverRequestJob = null
+                        false
+                    } else {
+                        true
                     }
+                }
+                if (!canStart) return@withContext
+                val advanceImmediately = synchronized(lock) {
+                    advanceToDeferredRecommendation
                 }
                 startPreview(
                     seedUri = track.uri,
                     recommendations = recommendations,
                     startIndex = 0,
                     artworkByKey = emptyMap(),
-                    deferUntilCurrentEnds = true
+                    deferUntilCurrentEnds = !advanceImmediately
                 )
+                synchronized(lock) {
+                    if (discoverRequestGeneration == requestGeneration) {
+                        discoverRequestJob = null
+                    }
+                }
             }
         }
         synchronized(lock) {
@@ -1088,17 +1101,36 @@ class RecommendationPreviewManager(
         }
     }
 
+    /** Routes every in-app Next action through preview policy before the library queue. */
+    fun skipToNext() {
+        val controller = musicController ?: return
+        if (!handleSessionNext()) controller.skipToNext()
+    }
+
     /**
-     * Handles Next while a recommendation preview is active. In normal
-     * (non-Discover) mode the transport buttons navigate the surrounding
-     * physical library: Next leaves the preview session and plays the
-     * physical item after the captured seed, mirroring [skipToPrevious].
-     * Discover mode routes Next through the queued recommendations, waking
-     * the preparation loop when the next item is not prepared yet.
+     * Gives MediaSession's notification, lock-screen, and hardware Next
+     * commands the same Discover policy as the in-app controls. `false`
+     * leaves the physical player command available to Media3.
      */
-    fun skipToNext(): Boolean {
+    fun handleSessionNext(): Boolean {
         val controller = musicController ?: return false
-        val currentTrack = controller.currentTrack.value ?: return false
+        return routeNextWithinPreview(controller)
+    }
+
+    private fun routeNextWithinPreview(controller: MusicController): Boolean {
+        val currentTrack = controller.currentTrack.value
+        if (currentTrack == null) {
+            return synchronized(lock) {
+                shouldHandleDiscoverNext(
+                    discoverMode = _state.value.discoverMode,
+                    handoffPending = discoverRequestJob != null,
+                    nextRecommendationAvailable = _state.value.active &&
+                        _state.value.recommendations.isNotEmpty(),
+                    extensionPending = discoverExtensionPending ||
+                        discoverPreparingKeys.isNotEmpty()
+                )
+            }
+        }
         val discoverMode: Boolean
         val active: Boolean
         val currentKey: String?
@@ -1107,8 +1139,9 @@ class RecommendationPreviewManager(
             active = _state.value.active
             currentKey = if (active) keyByUri[currentTrack.uri] else null
         }
-        if (!active) return false
+        if (!active && !discoverMode) return false
         if (!discoverMode) {
+            if (!active) return false
             if (currentKey == null) return false
             val physicalContext = synchronized(lock) {
                 if (physicalQueueBeforePreview.isEmpty() ||
@@ -1133,47 +1166,59 @@ class RecommendationPreviewManager(
             return controller.skipToNextPlaybackItem()
         }
         if (currentKey == null) {
-            val waitingForDiscoverHandoff = synchronized(lock) {
-                isDiscoverHandoffPending(
-                    discoverMode = _state.value.discoverMode,
-                    currentTrack = currentTrack,
-                    deferredInitialPlayback = deferredInitialPlayback,
-                    initialNormalTrackUri = initialNormalTrackUri,
-                    discoverRequestPending = discoverRequestJob != null,
-                    discoverStartedUri = discoverStartedUri
+            val discoverSnapshot = synchronized(lock) {
+                val matchesCurrentSeed = _state.value.seedUri == currentTrack.uri
+                Triple(
+                    isDiscoverHandoffPending(
+                        discoverMode = _state.value.discoverMode,
+                        currentTrack = currentTrack,
+                        deferredInitialPlayback = deferredInitialPlayback,
+                        initialNormalTrackUri = initialNormalTrackUri,
+                        discoverRequestPending = discoverRequestJob != null,
+                        discoverStartedUri = discoverStartedUri
+                    ),
+                    _state.value.recommendations.takeIf { matchesCurrentSeed }.orEmpty(),
+                    _state.value.seedUri?.takeIf { matchesCurrentSeed }
                 )
             }
-            if (!waitingForDiscoverHandoff) return false
+            val waitingForDiscoverHandoff = discoverSnapshot.first
+            val recommendations = discoverSnapshot.second
+            val seedUri = discoverSnapshot.third
+            if (!shouldHandleDiscoverNext(
+                    discoverMode = discoverMode,
+                    handoffPending = waitingForDiscoverHandoff,
+                    nextRecommendationAvailable = recommendations.isNotEmpty(),
+                    extensionPending = false
+                )
+            ) {
+                return false
+            }
 
-            val nextIsQueuedPreview = controller.getNextPlaybackItem()?.let { next ->
-                synchronized(lock) { keyByUri.containsKey(next.uri) }
-            } == true
-            if (nextIsQueuedPreview) {
+            val nextRecommendationKey = recommendations.firstOrNull()
+                ?.let(::recommendationKey)
+            val nextIsExpectedPreview = nextRecommendationKey != null &&
+                controller.getNextPlaybackItem()?.uri?.let { nextUri ->
+                    synchronized(lock) { keyByUri[nextUri] }
+                } == nextRecommendationKey
+            if (nextIsExpectedPreview) {
                 controller.skipToNextPlaybackItem()
                 return true
             }
-            // The deferred block is still being prepared (Last.fm fetch or
-            // the first preview download can take tens of seconds): arm the
-            // auto-advance on the first press, but never swallow repeated
-            // presses — they fall through to the player's own skip so the
-            // media keys move as soon as the block is enqueued instead of
-            // feeling dead while downloads are pending.
-            val alreadyArmed = synchronized(lock) {
-                if (advanceToDeferredRecommendation) {
-                    true
-                } else {
-                    advanceToDeferredRecommendation = true
-                    false
-                }
+            if (recommendations.isNotEmpty()) {
+                startPreview(
+                    seedUri = seedUri ?: currentTrack.uri,
+                    recommendations = recommendations,
+                    startIndex = 0,
+                    artworkByKey = emptyMap(),
+                    deferUntilCurrentEnds = false
+                )
+                return true
             }
-            return !alreadyArmed
-        }
 
-        val nextIsQueuedPreview = controller.getNextPlaybackItem()?.let { next ->
-            synchronized(lock) { keyByUri.containsKey(next.uri) }
-        } == true
-        if (nextIsQueuedPreview) {
-            controller.skipToNextPlaybackItem()
+            // Keep every press inside Discover while Last.fm or the first
+            // preview download is pending. Repeated presses are idempotent;
+            // they must never spill into the physical library queue.
+            synchronized(lock) { advanceToDeferredRecommendation = true }
             return true
         }
 
@@ -1181,14 +1226,36 @@ class RecommendationPreviewManager(
         val currentIndex = recommendations.indexOfFirst {
             recommendationKey(it) == currentKey
         }
-        if (currentIndex < 0 || currentIndex >= recommendations.lastIndex) return false
+        val nextIndex = nextDiscoverRecommendationIndex(currentIndex, recommendations.size)
+        val extensionPending = synchronized(lock) {
+            discoverExtensionPending || discoverPreparingKeys.isNotEmpty()
+        }
+        if (!shouldHandleDiscoverNext(
+                discoverMode = discoverMode,
+                handoffPending = false,
+                nextRecommendationAvailable = nextIndex != null,
+                extensionPending = extensionPending
+            )
+        ) {
+            return false
+        }
+        if (nextIndex == null) return true
+
+        val targetKey = recommendationKey(recommendations[nextIndex])
+        val nextIsExpectedPreview = controller.getNextPlaybackItem()?.uri?.let { nextUri ->
+            synchronized(lock) { keyByUri[nextUri] }
+        } == targetKey
+        if (nextIsExpectedPreview) {
+            controller.skipToNextPlaybackItem()
+            return true
+        }
 
         val seedUri = synchronized(lock) { _state.value.seedUri }
         if (seedUri != null) {
             startPreview(
                 seedUri = seedUri,
                 recommendations = recommendations,
-                startIndex = currentIndex + 1,
+                startIndex = nextIndex,
                 artworkByKey = emptyMap()
             )
             return true
@@ -2078,6 +2145,20 @@ class RecommendationPreviewManager(
                 ((deferredInitialPlayback && track.uri == initialNormalTrackUri) ||
                     (discoverRequestPending && discoverStartedUri == track.uri))
         } == true
+
+        /** Keeps Next inside Discover while a handoff, page, or next item is pending. */
+        internal fun shouldHandleDiscoverNext(
+            discoverMode: Boolean,
+            handoffPending: Boolean,
+            nextRecommendationAvailable: Boolean,
+            extensionPending: Boolean
+        ): Boolean = discoverMode &&
+            (handoffPending || nextRecommendationAvailable || extensionPending)
+
+        internal fun nextDiscoverRecommendationIndex(
+            currentIndex: Int,
+            recommendationCount: Int
+        ): Int? = (currentIndex + 1).takeIf { currentIndex >= 0 && it < recommendationCount }
 
         /** The current item must advance before a sixth item beyond it is prepared. */
         internal fun minimumCurrentIndexForRecommendation(

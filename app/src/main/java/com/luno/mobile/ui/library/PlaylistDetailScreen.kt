@@ -73,6 +73,7 @@ import com.luno.mobile.ui.components.SortChip
 import com.luno.mobile.ui.components.TrackActionsSheet
 import com.luno.mobile.ui.components.TrackSortMode
 import com.luno.mobile.ui.components.sortedByMode
+import com.luno.mobile.ui.components.sortedByPlaylistMembership
 import com.luno.mobile.ui.player.formatTime
 import com.luno.mobile.ui.theme.AccentGreen
 import com.luno.mobile.ui.theme.Dimens
@@ -104,10 +105,10 @@ fun PlaylistDetailScreen(
     val app = context.applicationContext as LunoApp
     val scope = rememberCoroutineScope()
 
-    // Sort mode (A–Z / Z–A / Recently added / Duration) — same chip as the Library
-    // tab; declared before the early return so the saveable state's hook
-    // order never changes.
-    var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.RECENT) }
+    // Keep playlist membership order separate from the Recently added sort.
+    // The saved order remains the default; the explicit Recently added option
+    // sorts by each track's library-added timestamp.
+    var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.PLAYLIST_ORDER) }
 
     // In-playlist search query — filters the track list (and therefore the
     // play context) by title/artist/album, Spotify style.
@@ -184,12 +185,8 @@ fun PlaylistDetailScreen(
         }
     }
     val sortedTracks = remember(filteredTracks, sortMode, membershipOrder) {
-        if (sortMode == TrackSortMode.RECENT && membershipOrder.isNotEmpty()) {
-            val order = membershipOrder.withIndex().associate { it.value.trackUri to it.index }
-            filteredTracks.sortedWith(
-                compareBy<Track> { order[it.uri] ?: Int.MAX_VALUE }
-                    .thenBy { it.addedAt }
-            )
+        if (sortMode == TrackSortMode.PLAYLIST_ORDER) {
+            filteredTracks.sortedByPlaylistMembership(membershipOrder.map { it.trackUri })
         } else {
             filteredTracks.sortedByMode(sortMode)
         }
@@ -478,7 +475,7 @@ private fun PlaylistHeader(
     onShuffleAll: (() -> Unit)? = null,
     onSearch: (() -> Unit)? = null,
     searchVisible: Boolean = false,
-    sortMode: TrackSortMode = TrackSortMode.RECENT,
+    sortMode: TrackSortMode = TrackSortMode.PLAYLIST_ORDER,
     onSortModeChange: ((TrackSortMode) -> Unit)? = null,
     shuffleActive: Boolean = false,
     favoritesFirst: Boolean = false,
@@ -609,7 +606,8 @@ private fun PlaylistHeader(
                     SortChip(
                         mode = sortMode,
                         onModeChange = onSortModeChange,
-                        compact = true
+                        compact = true,
+                        availableModes = TrackSortMode.PLAYLIST_MODES
                     )
                 }
             }

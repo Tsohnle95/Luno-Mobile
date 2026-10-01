@@ -81,6 +81,30 @@ The Android app's **Settings → App → Check for updates** entry reads this re
 
 Every future release must use the same keystore and key alias. Never generate a replacement key for an existing application ID unless you intentionally want Android to treat it as a different app.
 
+## Keep The Signing Identity Safe
+
+The keystore contains the private signing key; a password or shared secret by
+itself cannot recreate that key. A password can unlock a matching keystore if
+you still have the keystore file. Do not send signing passwords or keystore
+contents in chat.
+
+Keep the release keystore in an encrypted password manager or encrypted vault,
+with a second encrypted copy on offline storage in a separate location. Keep
+the alias and both passwords in the password manager, and record the signing
+certificate SHA-256 fingerprint so a restored copy can be checked. Keep the
+keystore outside the repository; the GitHub Actions secrets above hold the CI
+copy. Never store a plain keystore, password, or base64 copy in Git or an
+unencrypted note.
+
+The Android debug key is separate. Android/Gradle creates
+`~/.android/debug.keystore` automatically, and a computer reset can create a
+different debug certificate. A debug APK signed by the new key cannot update
+an app signed by the old debug key. Backing up that debug keystore preserves
+debug-over-debug installs, but published builds should use the one stable
+release keystore described above. If the old debug keystore is gone, recover
+it from a backup or export app data before a one-time uninstall; a secret
+string alone does not resolve `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+
 ## Release verification and update boundary
 
 The [release workflow](.github/workflows/android-release.yml) decodes the base64

@@ -68,4 +68,66 @@ class LibraryTransferRepositoryTest {
         assertThat(json).doesNotContain(track.uri)
         assertThat(json).contains("selected_tracks")
     }
+
+    @Test
+    fun favoritesBackupRestoresUniqueMetadataMatchWithoutExposingUri() = runBlocking<Unit> {
+        val original = Track(
+            uri = "content://private/original/song.mp3",
+            title = "Favorite Song",
+            artist = "Favorite Artist",
+            album = "Favorite Album",
+            durationMs = 212_000L,
+            isFavorite = true
+        )
+        database.trackDao().insertTrack(original)
+
+        val json = repository.encodeFavoritesMetadataBackup(
+            repository.buildFavoritesMetadataBackup()
+        )
+        assertThat(json).doesNotContain(original.uri)
+        assertThat(json).contains("Favorite Song")
+
+        database.trackDao().deleteTrack(original.uri)
+        val rescanned = original.copy(
+            uri = "content://media/external/audio/media/42",
+            isFavorite = false
+        )
+        database.trackDao().insertTrack(rescanned)
+
+        val result = repository.restoreFavoritesMetadataBackup(json)
+
+        assertThat(result.restoredCount).isEqualTo(1)
+        assertThat(result.ambiguousCount).isEqualTo(0)
+        assertThat(result.missingCount).isEqualTo(0)
+        assertThat(database.trackDao().getTrack(rescanned.uri)!!.isFavorite).isTrue()
+    }
+
+    @Test
+    fun favoritesBackupLeavesAmbiguousMetadataMatchesUntouched() = runBlocking<Unit> {
+        val original = Track(
+            uri = "content://private/original/song.mp3",
+            title = "Same Song",
+            artist = "Same Artist",
+            album = "Same Album",
+            durationMs = 180_000L,
+            isFavorite = true
+        )
+        database.trackDao().insertTrack(original)
+        val json = repository.encodeFavoritesMetadataBackup(
+            repository.buildFavoritesMetadataBackup()
+        )
+        database.trackDao().deleteTrack(original.uri)
+        val possibleMatches = listOf(
+            original.copy(uri = "content://media/one", isFavorite = false),
+            original.copy(uri = "content://media/two", isFavorite = false)
+        )
+        database.trackDao().insertTracks(possibleMatches)
+
+        val result = repository.restoreFavoritesMetadataBackup(json)
+
+        assertThat(result.restoredCount).isEqualTo(0)
+        assertThat(result.ambiguousCount).isEqualTo(1)
+        assertThat(possibleMatches.map { database.trackDao().getTrack(it.uri)!!.isFavorite })
+            .containsExactly(false, false)
+    }
 }

@@ -7,6 +7,10 @@ import com.luno.mobile.data.db.entity.PlaylistTrack
 import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.data.export.ImportPreview
 import com.luno.mobile.data.export.ImportResult
+import com.luno.mobile.data.export.FavoriteMetadataEntry
+import com.luno.mobile.data.export.FavoritesBackupImportResult
+import com.luno.mobile.data.export.FavoritesMetadataBackup
+import com.luno.mobile.data.export.FavoritesMetadataBackupCodec
 import com.luno.mobile.data.export.LibraryManifest
 import com.luno.mobile.data.export.LibraryManifestCodec
 import com.luno.mobile.data.export.ManifestPlaylist
@@ -41,6 +45,97 @@ class LibraryTransferRepository(
     suspend fun buildPlaylistsManifest(playlistIds: Collection<Long>): LibraryManifest =
         withContext(Dispatchers.IO) {
             buildManifest(ManifestScope.PLAYLISTS, null, playlistIds.toSet())
+        }
+
+    /** A compact, mobile-only backup of favorite flags and metadata match keys. */
+    suspend fun buildFavoritesMetadataBackup(): FavoritesMetadataBackup =
+        withContext(Dispatchers.IO) {
+            val sourcesByUri = sourceByTrackUri()
+            val favorites = trackDao.getAllTracksOnce()
+                .asSequence()
+                .filter { it.isFavorite }
+                .map { track ->
+                    FavoriteMetadataEntry(
+                        identitySha256 = sha256(track.uri),
+                        title = track.title,
+                        artist = track.artist,
+                        album = track.album,
+                        durationMs = track.durationMs.coerceIn(0L, 86_400_000L),
+                        source = sourcesByUri[track.uri]
+                    )
+                }
+                .sortedWith(compareBy({ it.artist.lowercase() }, { it.title.lowercase() }, { it.identitySha256 }))
+                .toList()
+            FavoritesMetadataBackup(Instant.now().toString(), favorites)
+        }
+
+    fun encodeFavoritesMetadataBackup(backup: FavoritesMetadataBackup): String =
+        FavoritesMetadataBackupCodec.encode(backup)
+
+    /**
+     * Restores favorite flags additively. Matches by private URI hash first,
+     * then provider identity, then unique normalized metadata and duration.
+     * No track is created and no existing favorite is cleared.
+     */
+    suspend fun restoreFavoritesMetadataBackup(input: String): FavoritesBackupImportResult =
+        withContext(Dispatchers.IO) {
+            val backup = FavoritesMetadataBackupCodec.decodeAndValidate(input)
+            val tracks = trackDao.getAllTracksOnce()
+            val sourceByUri = sourceByTrackUri()
+            val tracksByIdentity = tracks.groupBy { sha256(it.uri) }
+            val tracksBySource = tracks.mapNotNull { track ->
+                sourceByUri[track.uri]?.let { source -> sourceKey(source) to track }
+            }.groupBy({ it.first }, { it.second })
+            val tracksByMetadata = tracks.groupBy { favoriteMetadataKey(it.artist, it.title, it.album) }
+            val claimedUris = mutableSetOf<String>()
+            val matchedUris = mutableListOf<String>()
+            var ambiguous = 0
+            var missing = 0
+
+            for (favorite in backup.favorites) {
+                val exact = tracksByIdentity[favorite.identitySha256].orEmpty()
+                val identityMatch = exact.singleOrNull()?.takeIf { it.uri !in claimedUris }
+                val match = identityMatch ?: favorite.source?.let { source ->
+                    tracksBySource[sourceKey(source)].orEmpty()
+                        .filterNot { it.uri in claimedUris }
+                        .singleOrNull()
+                } ?: run {
+                    val sameMetadata = tracksByMetadata[
+                        favoriteMetadataKey(favorite.artist, favorite.title, favorite.album)
+                    ].orEmpty()
+                    val closeDuration = sameMetadata.filter {
+                        kotlin.math.abs(it.durationMs - favorite.durationMs) <= FAVORITE_DURATION_TOLERANCE_MS
+                    }.filterNot { it.uri in claimedUris }
+                    closeDuration.singleOrNull()
+                }
+
+                if (match != null) {
+                    claimedUris += match.uri
+                    matchedUris += match.uri
+                    continue
+                }
+
+                val sourceCandidates = favorite.source?.let { tracksBySource[sourceKey(it)].orEmpty() }.orEmpty()
+                val metadataCandidates = tracksByMetadata[
+                    favoriteMetadataKey(favorite.artist, favorite.title, favorite.album)
+                ].orEmpty()
+                val hasPlausibleButAmbiguousMatch =
+                    exact.size > 1 || exact.any { it.uri in claimedUris } ||
+                    sourceCandidates.size > 1 || sourceCandidates.any { it.uri in claimedUris } ||
+                    metadataCandidates.count {
+                        kotlin.math.abs(it.durationMs - favorite.durationMs) <= FAVORITE_DURATION_TOLERANCE_MS
+                    } > 1 || metadataCandidates.any { it.uri in claimedUris }
+                if (hasPlausibleButAmbiguousMatch) ambiguous++ else missing++
+            }
+
+            database.withTransaction {
+                matchedUris.forEach { uri -> trackDao.setFavorite(uri, true) }
+            }
+            FavoritesBackupImportResult(
+                restoredCount = matchedUris.size,
+                ambiguousCount = ambiguous,
+                missingCount = missing
+            )
         }
 
     fun encode(manifest: LibraryManifest): String = LibraryManifestCodec.encode(manifest)
@@ -270,7 +365,9 @@ class LibraryTransferRepository(
 
     private suspend fun sourceByTrackUri(): Map<String, ManifestSource> {
         return downloadJobDao.getCompletedDownloadsOnce().mapNotNull { job ->
-            val sourceId = extractYouTubeId(job.thumbnailUrl) ?: extractYouTubeId(job.sourceUrl)
+            val sourceId = job.videoId.takeIf { YOUTUBE_ID_PATTERN.matches(it) }
+                ?: extractYouTubeId(job.thumbnailUrl)
+                ?: extractYouTubeId(job.sourceUrl)
             if (sourceId == null || job.localUri.isBlank()) {
                 null
             } else {
@@ -363,6 +460,14 @@ class LibraryTransferRepository(
         .digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") { byte -> "%02x".format(byte) }
 
+    private fun favoriteMetadataKey(artist: String, title: String, album: String): String = listOf(
+        normalizeForDuplicate(artist),
+        normalizeForDuplicate(title),
+        normalizeForDuplicate(album)
+    ).joinToString("|")
+
+    private fun sourceKey(source: ManifestSource): String = "${source.provider}:${source.id}"
+
     private fun extractYouTubeId(value: String): String? {
         val match = Regex("(?:/vi/|/embed/|v=|youtu\\.be/)([A-Za-z0-9_-]{6,})").find(value)
             ?: return null
@@ -371,5 +476,7 @@ class LibraryTransferRepository(
 
     companion object {
         private const val UNSORTED_PLAYLIST_NAME = "Unsorted"
+        private const val FAVORITE_DURATION_TOLERANCE_MS = 3_000L
+        private val YOUTUBE_ID_PATTERN = Regex("^[A-Za-z0-9_-]{6,32}$")
     }
 }

@@ -31,6 +31,7 @@ semantic guarantees, Mobile orchestration and compatibility change paths.
 | Session, queue/history, discovery/previews | [Playback/discovery](docs/playback-discovery.md) | Media3 adapters, service and preview tests |
 | Job lifecycle, extraction, sync, promotion | [Downloads](docs/downloads.md) | Room jobs, WorkManager, repository/range tests |
 | Desktop transfer | [Transfer v1](contracts/library-export/v1/README.md) | Schema, fixtures, codec/repository tests |
+| Favorite flags and reinstall recovery | Room `Track.isFavorite`, mobile favorites JSON backup and Android database backup rules | Favorites codec/repository tests; keep the desktop transfer v1 wire format unchanged |
 | Toolchain, verification, debugging | [Development](docs/android-development.md) | Wrapper, catalog, Gradle config, workflows |
 | Signing, publishing, installed updates | [Releases](ANDROID_RELEASES.md) | Release workflow, updater, manifest/installer |
 

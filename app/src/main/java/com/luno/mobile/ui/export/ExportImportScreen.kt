@@ -39,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.luno.mobile.LunoApp
+import com.luno.mobile.data.export.FavoritesMetadataBackup
+import com.luno.mobile.data.export.FavoritesMetadataBackupCodec
 import com.luno.mobile.data.export.ImportPreview
 import com.luno.mobile.data.export.LibraryManifest
 import com.luno.mobile.ui.theme.AccentGreen
@@ -58,8 +60,11 @@ fun ExportImportScreen(
     val app = context.applicationContext as LunoApp
     val scope = rememberCoroutineScope()
     var pendingExport by remember { mutableStateOf<LibraryManifest?>(null) }
+    var pendingFavoritesExport by remember { mutableStateOf<FavoritesMetadataBackup?>(null) }
     var pendingImportJson by remember { mutableStateOf<String?>(null) }
+    var pendingFavoritesImportJson by remember { mutableStateOf<String?>(null) }
     var preview by remember { mutableStateOf<ImportPreview?>(null) }
+    var favoritesPreview by remember { mutableStateOf<FavoritesMetadataBackup?>(null) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
 
@@ -91,6 +96,34 @@ fun ExportImportScreen(
         }
     }
 
+    val favoritesExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        val backup = pendingFavoritesExport
+        if (uri == null || backup == null) {
+            pendingFavoritesExport = null
+            busy = false
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            busy = true
+            try {
+                val json = app.libraryTransferRepository.encodeFavoritesMetadataBackup(backup)
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(json.toByteArray(Charsets.UTF_8))
+                    } ?: error("Could not open the selected file")
+                }
+                status = "Saved a favorites backup with ${backup.favorites.size} song(s). Keep it outside Luno, such as in Downloads and your computer backup."
+            } catch (error: Exception) {
+                status = "Favorites backup failed: ${error.message ?: "Could not write the file"}"
+            } finally {
+                busy = false
+                pendingFavoritesExport = null
+            }
+        }
+    }
+
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -112,6 +145,28 @@ fun ExportImportScreen(
         }
     }
 
+    val favoritesImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = true
+            try {
+                val json = withContext(Dispatchers.IO) { readBounded(context, uri) }
+                val backup = FavoritesMetadataBackupCodec.decodeAndValidate(json)
+                pendingFavoritesImportJson = json
+                favoritesPreview = backup
+                status = null
+            } catch (error: Exception) {
+                status = "Favorites backup could not be opened: ${error.message ?: "Invalid backup"}"
+                pendingFavoritesImportJson = null
+                favoritesPreview = null
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     fun requestFullExport() {
         if (busy) return
         scope.launch {
@@ -121,6 +176,20 @@ fun ExportImportScreen(
                 exportLauncher.launch("luno-library.json")
             } catch (error: Exception) {
                 status = "Export failed: ${error.message ?: "Could not build manifest"}"
+                busy = false
+            }
+        }
+    }
+
+    fun requestFavoritesExport() {
+        if (busy) return
+        scope.launch {
+            busy = true
+            try {
+                pendingFavoritesExport = app.libraryTransferRepository.buildFavoritesMetadataBackup()
+                favoritesExportLauncher.launch("luno-favorites-backup.json")
+            } catch (error: Exception) {
+                status = "Favorites backup failed: ${error.message ?: "Could not prepare backup"}"
                 busy = false
             }
         }
@@ -150,9 +219,31 @@ fun ExportImportScreen(
         }
         Text(
             text = "Move playlists and song references between Luno installs. " +
-                "JSON files never contain audio, local paths, playback history, or secrets.",
+                "The full library transfer never contains audio, local paths, playback history, or secrets.",
             color = SecondaryText,
             style = MaterialTheme.typography.bodyMedium
+        )
+        Button(
+            onClick = ::requestFavoritesExport,
+            enabled = !busy,
+            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Filled.Download, contentDescription = null)
+            Text("Back up favorite songs", modifier = Modifier.padding(start = Dimens.paddingSmall))
+        }
+        OutlinedButton(
+            onClick = { if (!busy) favoritesImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Filled.UploadFile, contentDescription = null, tint = AccentGreen)
+            Text("Restore favorite songs", modifier = Modifier.padding(start = Dimens.paddingSmall), color = PrimaryText)
+        }
+        Text(
+            text = "Favorites backups contain song metadata and private match hashes only. They contain no audio or local file paths. Save the file outside the app so it remains available after uninstalling Luno.",
+            color = SecondaryText,
+            style = MaterialTheme.typography.bodySmall
         )
         Button(
             onClick = ::requestFullExport,
@@ -249,6 +340,56 @@ fun ExportImportScreen(
                 TextButton(onClick = {
                     preview = null
                     pendingImportJson = null
+                }) { Text("Cancel", color = SecondaryText) }
+            }
+        )
+    }
+
+    val currentFavoritesPreview = favoritesPreview
+    if (currentFavoritesPreview != null) {
+        AlertDialog(
+            onDismissRequest = {
+                favoritesPreview = null
+                pendingFavoritesImportJson = null
+            },
+            containerColor = SurfaceDark,
+            titleContentColor = PrimaryText,
+            textContentColor = SecondaryText,
+            title = { Text("Restore favorites") },
+            text = {
+                Text(
+                    "This backup has ${currentFavoritesPreview.favorites.size} favorite song(s). " +
+                        "Luno will mark unique matches in your current library as favorites. " +
+                        "Unmatched or ambiguous songs will be left unchanged."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val json = pendingFavoritesImportJson ?: return@TextButton
+                        scope.launch {
+                            busy = true
+                            try {
+                                val result = app.libraryTransferRepository
+                                    .restoreFavoritesMetadataBackup(json)
+                                status = "Favorites restored: ${result.restoredCount} matched, " +
+                                    "${result.ambiguousCount} ambiguous, ${result.missingCount} not found."
+                                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                                favoritesPreview = null
+                                pendingFavoritesImportJson = null
+                            } catch (error: Exception) {
+                                status = "Favorites restore failed: ${error.message ?: "Could not restore backup"}"
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    }
+                ) { Text("Restore", color = AccentGreen) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    favoritesPreview = null
+                    pendingFavoritesImportJson = null
                 }) { Text("Cancel", color = SecondaryText) }
             }
         )

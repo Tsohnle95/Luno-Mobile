@@ -14,14 +14,14 @@ class SortChipTest {
     }
 
     @Test
-    fun `recent sort puts newest songs first`() {
+    fun `recent sort puts newest songs at bottom`() {
         val tracks = listOf(
             Track(uri = "old", title = "Old", addedAt = 100L),
             Track(uri = "new", title = "New", addedAt = 200L)
         )
 
         assertThat(tracks.sortedByMode(TrackSortMode.RECENT).map { it.uri })
-            .containsExactly("new", "old")
+            .containsExactly("old", "new")
             .inOrder()
     }
 

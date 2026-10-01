@@ -114,7 +114,7 @@ fun LibraryScreen(
     val shuffleEnabled by musicController.shuffleEnabled.collectAsState()
     var query by rememberSaveable { mutableStateOf("") }
     var playlistView by rememberSaveable { mutableStateOf(false) }
-    var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.AZ) }
+    var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.RECENT) }
 
     // All-or-nothing first render: hold the whole screen behind one static
     // placeholder until the library data has emitted its first values

@@ -111,6 +111,40 @@ class ArtworkFetchService(
             }
         }
 
+    /** Tries YouTube's largest thumbnail variants before the stored fallback. */
+    suspend fun fetchBestAndSaveImage(context: Context, imageUrl: String): String? {
+        val candidates = youtubeThumbnailCandidates(imageUrl)
+        var bestPath: String? = null
+        var bestScore = 0L
+        for (candidate in candidates) {
+            val path = fetchAndSaveImage(context, candidate)
+            val score = ArtworkStorage.qualityScore(path)
+            if (score > bestScore) {
+                bestPath?.takeIf { it != path }?.let { java.io.File(it).delete() }
+                bestPath = path
+                bestScore = score
+            } else if (path != null && path != bestPath) {
+                java.io.File(path).delete()
+            }
+        }
+        return bestPath
+    }
+
+    internal fun youtubeThumbnailCandidates(imageUrl: String): List<String> {
+        val match = Regex("https?://(?:i\\.ytimg\\.com|img\\.youtube\\.com)/vi/([^/?]+)/[^?]+")
+            .find(imageUrl.trim())
+        val videoId = match?.groupValues?.getOrNull(1)
+        if (videoId.isNullOrBlank()) return listOf(imageUrl)
+        val root = "https://i.ytimg.com/vi/$videoId"
+        return listOf(
+            "$root/maxresdefault.jpg",
+            "$root/hq720.jpg",
+            "$root/sddefault.jpg",
+            "$root/hqdefault.jpg",
+            imageUrl
+        ).distinct()
+    }
+
     companion object {
         private const val DEEZER_SEARCH_URL = "https://api.deezer.com/search"
         private const val TIMEOUT_SECONDS = 8L

@@ -29,8 +29,17 @@ interface DownloadJobDao {
     @Query("UPDATE download_jobs SET state = :state, progress = :progress WHERE id = :id")
     suspend fun updateProgress(id: Long, state: DownloadState, progress: Int)
 
-    @Query("UPDATE download_jobs SET state = :state, localUri = :localUri, completedAt = :completedAt, progress = 100 WHERE id = :id")
+    @Query("UPDATE download_jobs SET state = :state, localUri = :localUri, completedAt = :completedAt, progress = 100, errorMessage = '' WHERE id = :id")
     suspend fun markCompleted(id: Long, state: DownloadState, localUri: String, completedAt: Long)
+
+    @Query("UPDATE download_jobs SET state = :state, localUri = :localUri, completedAt = :completedAt, progress = 100, errorMessage = :destinationNotice WHERE id = :id")
+    suspend fun markCompletedWithNotice(
+        id: Long,
+        state: DownloadState,
+        localUri: String,
+        completedAt: Long,
+        destinationNotice: String
+    )
 
     @Query("UPDATE download_jobs SET state = :state, errorMessage = :errorMessage WHERE id = :id")
     suspend fun markFailed(id: Long, state: DownloadState, errorMessage: String)

@@ -59,12 +59,22 @@ The main flows are:
    the media service.
 4. Downloads stage temporary files, validate media, then promote atomically
    into the app library/download area. WorkManager owns durable background work
-   and retry state.
+   and retry state. Startup reconciles active Room download rows against
+   WorkManager terminal states so interrupted jobs cannot leave a permanent
+   progress indicator. Eligible YouTube CDN media uses bounded, validated
+   parallel byte ranges and falls back to the ordinary stream when ranges are
+   unsupported. Copying completed audio to a selected SAF folder requires
+   persisted read and write grants; failed folder copies retain the usable
+   app-private audio and report its actual destination.
 5. Discovery uses the user’s Last.fm key and NewPipeExtractor-backed search;
    recommendation previews remain temporary until explicitly saved.
 6. Transfer export snapshots logical tracks and playlist memberships. Import
    validates the v1 manifest, matches against the current library, and applies
    additive changes with ambiguity reporting.
+7. The Settings drawer's artwork quality scan checks cached pixel dimensions,
+   tries larger YouTube thumbnails and cover search, and replaces a song's
+   cached artwork only when the new image has more pixels. Playlist detail
+   uses membership order for its default chronological song view.
 
 ## Repository map
 

@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -180,6 +181,15 @@ class LunoApp : Application(), Configuration.Provider {
         }
         appScope.launch {
             downloadRepository.repairMissingDownloadedArtwork()
+        }
+        appScope.launch {
+            downloadRepository.reconcileActiveDownloads()
+            // WorkManager can fail a task while the app stays open. Keep the
+            // Room-backed progress UI in sync without requiring a relaunch.
+            while (true) {
+                delay(30_000)
+                runCatching { downloadRepository.reconcileActiveDownloads() }
+            }
         }
 
         createDownloadNotificationChannel()

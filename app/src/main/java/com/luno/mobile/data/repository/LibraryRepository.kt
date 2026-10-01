@@ -43,7 +43,7 @@ class LibraryRepository(
         artworkFetchService.fetchAndSave(context, track.artist, track.title)
     },
     private val thumbnailArtwork: suspend (String) -> String? = { url ->
-        artworkFetchService.fetchAndSaveImage(context, url)
+        artworkFetchService.fetchBestAndSaveImage(context, url)
     },
     private val downloadJobDao: DownloadJobDao? = null
 ) {
@@ -1027,6 +1027,43 @@ class LibraryRepository(
                     trackDao.updateTrack(track.copy(albumArtPath = path))
                     updated++
                 }
+            }
+            onProgress(index + 1, tracks.size, updated)
+        }
+        updated
+    }
+
+    /**
+     * Scans every song and keeps a replacement only when its decoded pixel
+     * area is larger than the current cached image. Downloaded songs try the
+     * highest available YouTube thumbnail; all songs also try cover search.
+     */
+    suspend fun upgradeArtwork(
+        onProgress: (scanned: Int, total: Int, updated: Int) -> Unit = { _, _, _ -> }
+    ): Int = withContext(Dispatchers.IO) {
+        val tracks = trackDao.getAllTracksOnce()
+        val thumbnailByTrackUri = downloadJobDao
+            ?.getCompletedDownloadsOnce()
+            ?.filter { it.thumbnailUrl.isNotBlank() && it.localUri.isNotBlank() }
+            ?.associate { it.localUri to it.thumbnailUrl }
+            .orEmpty()
+        var updated = 0
+        tracks.forEachIndexed { index, track ->
+            val currentScore = ArtworkStorage.qualityScore(track.albumArtPath)
+            val candidates = buildList {
+                thumbnailByTrackUri[track.uri]?.let { url ->
+                    runCatching { thumbnailArtwork(url) }.getOrNull()?.let(::add)
+                }
+                runCatching { remoteArtwork(track) }.getOrNull()?.let(::add)
+            }.distinct()
+            val best = candidates.maxByOrNull(ArtworkStorage::qualityScore)
+            val bestScore = ArtworkStorage.qualityScore(best)
+            if (best != null && bestScore > currentScore) {
+                trackDao.updateTrack(track.copy(albumArtPath = best))
+                updated++
+            }
+            candidates.filter { it != best || bestScore <= currentScore }.forEach { candidate ->
+                if (candidate != track.albumArtPath) runCatching { java.io.File(candidate).delete() }
             }
             onProgress(index + 1, tracks.size, updated)
         }

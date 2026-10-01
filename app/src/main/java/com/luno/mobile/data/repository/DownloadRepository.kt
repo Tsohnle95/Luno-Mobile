@@ -10,6 +10,7 @@ import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.luno.mobile.data.artwork.ArtworkStorage
 import com.luno.mobile.data.artwork.ArtworkFetchService
@@ -59,6 +60,53 @@ class DownloadRepository(
 
     suspend fun getDownload(id: Long): DownloadJob? = downloadJobDao.getDownload(id)
 
+    /**
+     * Repairs database rows whose WorkManager work has already reached a
+     * terminal state. The UI deliberately reads Room (so download history is
+     * durable), but that means a killed/cancelled worker can otherwise leave a
+     * QUEUED/DOWNLOADING row spinning forever after the OS has forgotten it.
+     */
+    suspend fun reconcileActiveDownloads() = withContext(Dispatchers.IO) {
+        val workManager = WorkManager.getInstance(context)
+        downloadJobDao.getActiveDownloadsOnce().forEach { job ->
+            val info = job.workManagerId
+                .takeIf { it.isNotBlank() }
+                ?.let { value -> runCatching { UUID.fromString(value) }.getOrNull() }
+                ?.let { id -> runCatching { workManager.getWorkInfoById(id).get() }.getOrNull() }
+
+            when (info?.state) {
+                WorkInfo.State.ENQUEUED,
+                WorkInfo.State.BLOCKED,
+                WorkInfo.State.RUNNING -> Unit
+                WorkInfo.State.CANCELLED -> downloadJobDao.markFailed(
+                    job.id,
+                    DownloadState.CANCELLED,
+                    "Cancelled"
+                )
+                WorkInfo.State.FAILED -> downloadJobDao.markFailed(
+                    job.id,
+                    DownloadState.FAILED,
+                    "Download worker failed. Tap Retry."
+                )
+                WorkInfo.State.SUCCEEDED -> {
+                    // A successful DownloadWorker commits COMPLETED in the same
+                    // DB transaction as the Track. If the row is still active,
+                    // finalization did not commit and must be surfaced.
+                    downloadJobDao.markFailed(
+                        job.id,
+                        DownloadState.FAILED,
+                        "Download finished but could not be saved. Tap Retry."
+                    )
+                }
+                null -> downloadJobDao.markFailed(
+                    job.id,
+                    DownloadState.FAILED,
+                    "Download task was interrupted. Tap Retry."
+                )
+            }
+        }
+    }
+
     suspend fun enqueueDownload(
         sourceUrl: String,
         title: String,
@@ -68,8 +116,13 @@ class DownloadRepository(
         playlistIds: List<Long> = emptyList(),
         videoId: String = ""
     ): Long {
+        val normalizedSourceUrl = sourceUrl.trim()
+        require(
+            normalizedSourceUrl.startsWith("https://", ignoreCase = true) ||
+                normalizedSourceUrl.startsWith("http://", ignoreCase = true)
+        ) { "Enter a complete http:// or https:// audio URL" }
         Log.d(TAG, "enqueueDownload: $title by $artist")
-        Log.d(TAG, "Source URL (truncated): ${sourceUrl.take(120)}")
+        Log.d(TAG, "Source URL (truncated): ${normalizedSourceUrl.take(120)}")
 
         val resolvedPlaylistId = playlistId ?: ensureUnsortedPlaylistId()
         val destinationPlaylistIds = buildList {
@@ -78,7 +131,7 @@ class DownloadRepository(
         }.distinct()
 
         val job = DownloadJob(
-            sourceUrl = sourceUrl,
+            sourceUrl = normalizedSourceUrl,
             title = title,
             artist = artist,
             state = DownloadState.QUEUED,
@@ -173,7 +226,7 @@ class DownloadRepository(
             val artworkPath = job.thumbnailUrl
                 .takeIf { it.isNotBlank() }
                 ?.let { thumbnailUrl ->
-                    artworkFetchService.fetchAndSaveImage(context, thumbnailUrl)
+                    artworkFetchService.fetchBestAndSaveImage(context, thumbnailUrl)
                 }
                 ?: artworkFetchService.fetchAndSave(
                     context,

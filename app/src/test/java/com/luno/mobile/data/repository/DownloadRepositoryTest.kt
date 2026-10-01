@@ -74,6 +74,34 @@ class DownloadRepositoryTest {
     }
 
     @Test
+    fun reconcileActiveDownloads_marksOrphanedRowFailed() = runBlocking {
+        val id = database.downloadJobDao().insertDownload(
+            DownloadJob(
+                sourceUrl = "https://example.com/orphaned.m4a",
+                title = "Orphaned",
+                state = DownloadState.DOWNLOADING,
+                workManagerId = ""
+            )
+        )
+
+        repository.reconcileActiveDownloads()
+
+        val repaired = database.downloadJobDao().getDownload(id)!!
+        assertThat(repaired.state).isEqualTo(DownloadState.FAILED)
+        assertThat(repaired.errorMessage).contains("interrupted")
+    }
+
+    @Test
+    fun enqueueDownload_rejectsMalformedUrlBeforeCreatingJob() = runBlocking {
+        val result = runCatching {
+            repository.enqueueDownload("ttps://example.com/song.mp3", "Bad URL")
+        }
+
+        assertThat(result.exceptionOrNull()).isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(database.downloadJobDao().getAllDownloads().first()).isEmpty()
+    }
+
+    @Test
     fun enqueueDownload_persistsThumbnailUrl() = runBlocking {
         val id = repository.enqueueDownload(
             sourceUrl = "https://example.com/audio.m4a",

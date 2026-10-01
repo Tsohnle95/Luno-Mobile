@@ -48,6 +48,8 @@ import com.luno.mobile.ui.theme.Dimens
 import com.luno.mobile.ui.theme.PrimaryText
 import com.luno.mobile.ui.theme.SecondaryText
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun DownloadsScreen() {
@@ -61,6 +63,9 @@ fun DownloadsScreen() {
     val tracks by libraryData.tracks.collectAsState()
     val playlistsWithUrls by libraryData.playlistsWithUrls.collectAsState()
     val libraryLoaded by libraryData.loaded.collectAsState()
+    val downloadCounts = downloads.filter { it.state == DownloadState.COMPLETED }.groupingBy { job ->
+        job.videoId.ifBlank { job.sourceUrl }
+    }.eachCount()
 
     // All-or-nothing first render (same as the other tabs): normally the
     // library data is already warm from startup.
@@ -230,6 +235,7 @@ fun DownloadsScreen() {
             ) { job ->
                 DownloadJobRow(
                     job = job,
+                    downloadCount = downloadCounts[job.videoId.ifBlank { job.sourceUrl }] ?: 1,
                     artworkUri = tracks.firstOrNull { it.uri == job.localUri }?.let { track ->
                         track.albumArtPath
                             ?.takeIf(ArtworkStorage::hasUsableArtwork)
@@ -247,6 +253,7 @@ fun DownloadsScreen() {
 @Composable
 private fun DownloadJobRow(
     job: DownloadJob,
+    downloadCount: Int,
     artworkUri: String?,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
@@ -307,6 +314,39 @@ private fun DownloadJobRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = stateColor
             )
+            val timestamp = job.completedAt.takeIf { it > 0L } ?: job.addedAt
+            Text(
+                text = buildString {
+                    if (job.state == DownloadState.COMPLETED) {
+                        append("Downloaded $downloadCount time")
+                        if (downloadCount != 1) append('s')
+                        append(" · ")
+                    } else {
+                        append("Added · ")
+                    }
+                    append(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(timestamp)))
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = SecondaryText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (job.state == DownloadState.COMPLETED) {
+                val destinationStatus = job.errorMessage.ifBlank {
+                    if (job.localUri.startsWith("content://")) {
+                        "Saved to the selected Music folder"
+                    } else {
+                        "Saved in Luno app storage"
+                    }
+                }
+                Text(
+                    text = destinationStatus,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SecondaryText,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         when (job.state) {

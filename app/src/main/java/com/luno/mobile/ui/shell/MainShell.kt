@@ -335,6 +335,9 @@ fun MainShell(
     // artwork… N/M" strip under the header, owned by ArtworkFetchManager.
     val artworkStatus by app.artworkFetchManager.status.collectAsState()
     val folderImportLauncher = rememberLauncherForActivityResult(
+        // OpenDocumentTree requests a persistable tree grant with READ and
+        // WRITE modes; MusicFolderImportManager persists both modes so the
+        // selected folder can receive completed downloads after a restart.
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: android.net.Uri? ->
         if (uri != null) {
@@ -623,9 +626,9 @@ fun MainShell(
                     DrawerItem(
                         icon = Icons.Filled.Image,
                         label = if (artworkStatus is ArtworkFetchStatus.Progress) {
-                            "Fetching artwork…"
+                            "Scanning artwork quality…"
                         } else {
-                            "Fetch missing artwork"
+                            "Upgrade artwork quality"
                         },
                         onClick = {
                             scope.launch { drawerState.close() }
@@ -874,8 +877,8 @@ fun MainShell(
                                     .height(Dimens.progressBarHeight)
                             )
                             Text(
-                                text = "Fetching missing artwork… ${artwork.scanned}/${artwork.total}" +
-                                    if (artwork.updated > 0) " (${artwork.updated} found)" else "",
+                                text = "Scanning artwork quality… ${artwork.scanned}/${artwork.total}" +
+                                    if (artwork.updated > 0) " (${artwork.updated} upgraded)" else "",
                                 color = AccentGreen,
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.padding(vertical = Dimens.paddingSmall)
@@ -886,8 +889,8 @@ fun MainShell(
                                 artwork.failed ->
                                     "Artwork fetch failed — please try again" +
                                         artwork.errorMessage?.let { " ($it)" }.orEmpty()
-                                artwork.updated > 0 -> "Artwork fetched for ${artwork.updated} track(s)"
-                                else -> "No missing artwork found"
+                                artwork.updated > 0 -> "Higher-quality artwork saved for ${artwork.updated} track(s)"
+                                else -> "Artwork is already the best available"
                             },
                             color = if (artwork.failed) {
                                 MaterialTheme.colorScheme.error

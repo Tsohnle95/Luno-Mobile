@@ -20,7 +20,10 @@ import java.security.MessageDigest
  */
 object ArtworkStorage {
 
-    private const val MAX_DIMENSION_PX = 512
+    // Full-screen landscape artwork needs materially more than the old 512px
+    // cache. Row images are still decoded at 192px by Coil, so storing a good
+    // source does not reintroduce scrolling memory churn.
+    private const val MAX_DIMENSION_PX = 1440
     private const val JPEG_QUALITY = 90
 
     /** Directory holding cached artwork files (created on demand). */
@@ -118,6 +121,19 @@ object ArtworkStorage {
         } catch (_: Exception) {
             false
         }
+    }
+
+    /** Pixel area of a cached image, used to replace art only when it improves. */
+    fun qualityScore(path: String?): Long {
+        if (path.isNullOrBlank()) return 0L
+        val file = File(path)
+        if (!file.isFile || file.length() == 0L) return 0L
+        return runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) 0L
+            else bounds.outWidth.toLong() * bounds.outHeight.toLong()
+        }.getOrDefault(0L)
     }
 
     /**

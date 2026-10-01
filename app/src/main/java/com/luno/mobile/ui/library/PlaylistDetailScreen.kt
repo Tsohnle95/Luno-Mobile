@@ -107,7 +107,7 @@ fun PlaylistDetailScreen(
     // Sort mode (A–Z / Z–A / Recently added / Duration) — same chip as the Library
     // tab; declared before the early return so the saveable state's hook
     // order never changes.
-    var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.AZ) }
+    var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.RECENT) }
 
     // In-playlist search query — filters the track list (and therefore the
     // play context) by title/artist/album, Spotify style.
@@ -124,6 +124,13 @@ fun PlaylistDetailScreen(
     // transition (membership changes flow in live too).
     val playlists by app.libraryData.playlists.collectAsState()
     val playlistWithTracks = playlists.firstOrNull { it.playlist.id == playlistId }
+    val membershipOrder by remember(playlistId, virtualTracks) {
+        if (virtualTracks == null && playlistId > 0L) {
+            app.database.playlistDao().observePlaylistTracks(playlistId)
+        } else {
+            kotlinx.coroutines.flow.flowOf(emptyList())
+        }
+    }.collectAsState(initial = emptyList())
     val shuffleEnabled by musicController.shuffleEnabled.collectAsState()
 
     // All-or-nothing first render: hold the screen behind one static
@@ -176,7 +183,17 @@ fun PlaylistDetailScreen(
                 it.album.contains(query, ignoreCase = true)
         }
     }
-    val sortedTracks = remember(filteredTracks, sortMode) { filteredTracks.sortedByMode(sortMode) }
+    val sortedTracks = remember(filteredTracks, sortMode, membershipOrder) {
+        if (sortMode == TrackSortMode.RECENT && membershipOrder.isNotEmpty()) {
+            val order = membershipOrder.withIndex().associate { it.value.trackUri to it.index }
+            filteredTracks.sortedWith(
+                compareBy<Track> { order[it.uri] ?: Int.MAX_VALUE }
+                    .thenBy { it.addedAt }
+            )
+        } else {
+            filteredTracks.sortedByMode(sortMode)
+        }
+    }
     val displayedTracks = remember(sortedTracks, favoritesFirst) {
         if (favoritesFirst) sortedTracks.sortedByDescending { it.isFavorite } else sortedTracks
     }
@@ -461,7 +478,7 @@ private fun PlaylistHeader(
     onShuffleAll: (() -> Unit)? = null,
     onSearch: (() -> Unit)? = null,
     searchVisible: Boolean = false,
-    sortMode: TrackSortMode = TrackSortMode.AZ,
+    sortMode: TrackSortMode = TrackSortMode.RECENT,
     onSortModeChange: ((TrackSortMode) -> Unit)? = null,
     shuffleActive: Boolean = false,
     favoritesFirst: Boolean = false,

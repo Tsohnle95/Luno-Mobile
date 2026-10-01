@@ -51,7 +51,7 @@ class ArtworkFetchManager(
     private val libraryRepository: LibraryRepository,
     private val context: Context,
     private val fetchArtwork: suspend (onProgress: (Int, Int, Int) -> Unit) -> Int =
-        { onProgress -> libraryRepository.fetchMissingArtwork(onProgress) }
+        { onProgress -> libraryRepository.upgradeArtwork(onProgress) }
 ) {
     private val _status = MutableStateFlow<ArtworkFetchStatus?>(null)
     val status: StateFlow<ArtworkFetchStatus?> = _status.asStateFlow()
@@ -71,9 +71,9 @@ class ArtworkFetchManager(
                 finish(ArtworkFetchStatus.Finished(updated))
                 showToast(
                     if (updated > 0) {
-                        "Artwork fetched for $updated track(s)"
+                        "Higher-quality artwork saved for $updated track(s)"
                     } else {
-                        "No missing artwork found"
+                        "Artwork is already the best available"
                     }
                 )
             } catch (e: CancellationException) {

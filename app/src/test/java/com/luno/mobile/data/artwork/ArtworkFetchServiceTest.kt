@@ -99,6 +99,18 @@ class ArtworkFetchServiceTest {
         assertThat(server.requestCount).isEqualTo(3)
     }
 
+    @Test
+    fun youtubeThumbnailCandidates_tryHighestQualityFirst() {
+        val candidates = service.youtubeThumbnailCandidates(
+            "https://i.ytimg.com/vi/abc123/mqdefault.jpg"
+        )
+
+        assertThat(candidates.first())
+            .isEqualTo("https://i.ytimg.com/vi/abc123/maxresdefault.jpg")
+        assertThat(candidates.last())
+            .isEqualTo("https://i.ytimg.com/vi/abc123/mqdefault.jpg")
+    }
+
     private fun jpegBytes(): ByteArray {
         val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
         return ByteArrayOutputStream().use { output ->

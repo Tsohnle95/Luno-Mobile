@@ -32,8 +32,8 @@ import com.luno.mobile.ui.theme.PrimaryText
 
 /**
  * Sort modes shared by the Library and Playlist-detail screens.
- * [RECENT] is newest-first by added/created timestamp and [DURATION] is
- * longest-first (descending duration).
+ * [RECENT] puts newly added songs at the bottom of a song list. Playlists
+ * themselves remain newest-first. [DURATION] is longest-first.
  */
 enum class TrackSortMode(val label: String) {
     AZ("A–Z"),
@@ -46,7 +46,7 @@ enum class TrackSortMode(val label: String) {
 fun List<Track>.sortedByMode(mode: TrackSortMode): List<Track> = when (mode) {
     TrackSortMode.AZ -> sortedBy { it.title.lowercase() }
     TrackSortMode.ZA -> sortedByDescending { it.title.lowercase() }
-    TrackSortMode.RECENT -> sortedByDescending { it.addedAt }
+    TrackSortMode.RECENT -> sortedBy { it.addedAt }
     TrackSortMode.DURATION -> sortedByDescending { it.durationMs }
 }
 

@@ -18,15 +18,19 @@ import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.data.repository.DownloadRepository
 import com.luno.mobile.data.repository.MusicFolderRepository
 import okhttp3.ConnectionSpec
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class DownloadWorker(
     private val context: Context,
@@ -69,6 +73,7 @@ class DownloadWorker(
         var downloadedFile: File? = null
         var destinationUri: Uri? = null
         var artworkDestinationUri: Uri? = null
+        var destinationNotice = ""
 
         val job = jobDao.getDownload(jobId) ?: run {
             Log.e(TAG, "doWork: job $jobId not found")
@@ -78,6 +83,15 @@ class DownloadWorker(
         val srcUrl = if (job.sourceUrl.startsWith("http://")) {
             job.sourceUrl.replaceFirst("http://", "https://")
         } else job.sourceUrl
+        val parsedSourceUrl = srcUrl.toHttpUrlOrNull()
+        if (parsedSourceUrl == null || parsedSourceUrl.scheme !in setOf("http", "https")) {
+            jobDao.markFailed(
+                jobId,
+                DownloadState.FAILED,
+                "Invalid audio URL. Use a complete http:// or https:// link."
+            )
+            return Result.failure()
+        }
 
         Log.d(TAG, "Downloading $jobId: ${job.title}")
 
@@ -87,141 +101,173 @@ class DownloadWorker(
         setForeground(createForegroundInfo(job.title))
 
         val request = Request.Builder()
-            .url(srcUrl)
+            .url(parsedSourceUrl)
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.165 Mobile Safari/537.36")
             .header("Referer", "https://www.youtube.com")
             .header("Origin", "https://www.youtube.com")
-            // Intentionally omit `Range: bytes=0-` — some Invidious proxies and
-            // googlevideo endpoints treat it as a resume request and return 416
-            // when the URL is not range-capable.
+            // The range downloader adds explicit bounded ranges only for
+            // googlevideo.com. The ordinary fallback request remains un-ranged.
             .build()
 
-        var call = client.newCall(request)
-        // CoroutineWorker.isStopped is polled in the byte-copy loop, but
-        // `execute()` itself blocks up to readTimeout (60 s). Tie cancellation
-        // to `isStopped` so a user tapping Stop cancels the HTTP call quickly.
-        val monitorJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
-            while (!isStopped) kotlinx.coroutines.delay(200)
-            try { call.cancel() } catch (_: Exception) { }
-        }
+        var call: okhttp3.Call? = null
+        var response: Response? = null
+        var monitorJob: kotlinx.coroutines.Job? = null
+        val downloadDir = File(context.filesDir, KEY_DOWNLOAD_DIR)
+        downloadDir.mkdirs()
+        val safeFileBase = "${job.artist} - ${job.title}"
+            .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
+            .trim()
+            .take(120)
+            .ifBlank { "download" }
+        val fileToken = UUID.nameUUIDFromBytes(
+            "$jobId|${job.addedAt}|${job.sourceUrl}".toByteArray()
+        )
+        val safeFileName = "${safeFileBase}_${jobId}_$fileToken"
 
         try {
             if (isStopped) {
                 jobDao.markFailed(jobId, DownloadState.CANCELLED, "Cancelled")
                 return Result.failure()
             }
-            val response = try {
-                call.execute()
-            } catch (e: IOException) {
-                if (isStopped) {
-                    Log.d(TAG, "Cancelled during connect for job $jobId")
-                    jobDao.markFailed(jobId, DownloadState.CANCELLED, "Cancelled")
-                    return Result.failure()
-                }
-                throw e
-            }
 
-            val protocol = response.protocol
-            Log.d(TAG, "Protocol: $protocol, code: ${response.code}")
-
-            if (response.code != 200 && response.code != 206) {
-                // Redacted diagnostics: response headers can carry signed stream
-                // URLs (e.g. Location after a redirect) — never log full headers.
-                Log.w(TAG, "HTTP ${response.code} from ${response.request.url.host}")
-                val contentType = response.header("Content-Type")
-                val contentRange = response.header("Content-Range")
-                if (contentType != null) Log.w(TAG, "  Content-Type: $contentType")
-                if (contentRange != null) Log.w(TAG, "  Content-Range: $contentRange")
-                response.close()
-                jobDao.markFailed(jobId, DownloadState.FAILED, downloadErrorForCode(response.code))
-                return Result.failure()
-            }
-
-            val body = response.body
-            if (body == null) {
-                response.close()
-                jobDao.markFailed(jobId, DownloadState.FAILED, "Empty response body")
-                return Result.failure()
-            }
-
-            val contentLength = body.contentLength()
-            Log.d(TAG, "Content-Length: $contentLength, protocol: $protocol")
-            val inputStream = body.byteStream()
-
-            val downloadDir = File(context.filesDir, KEY_DOWNLOAD_DIR)
-            downloadDir.mkdirs()
-
-            val safeFileBase = "${job.artist} - ${job.title}"
-                .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
-                .trim()
-                .take(120)
-                .ifBlank { "download" }
-            val fileToken = UUID.nameUUIDFromBytes(
-                "$jobId|${job.addedAt}|${job.sourceUrl}".toByteArray()
-            )
-            val safeFileName = "${safeFileBase}_${jobId}_$fileToken"
-
-            val contentType = body.contentType()?.toString() ?: ""
-            val ext = when {
-                contentType.contains("opus") || contentType.contains("webm") -> ".opus"
-                contentType.contains("mp4") || contentType.contains("m4a") -> ".m4a"
-                contentType.contains("mp3") || contentType.contains("mpeg") -> ".mp3"
-                contentType.contains("ogg") -> ".ogg"
-                else -> ".audio"
-            }
-            val file = File(downloadDir, "$safeFileName$ext")
-            downloadedFile = file
-            Log.d(TAG, "Saving as: $ext (from contentType: $contentType)")
-
+            var downloadFile: File? = null
+            var contentType = ""
             var totalBytes = 0L
-            val buffer = ByteArray(8192)
-            var bytesRead: Int
+            val rangeStage = File(downloadDir, ".$safeFileName-${UUID.randomUUID()}.range")
+            val rangeOutcome = ParallelRangeDownloader(client).download(
+                request = request,
+                targetFile = rangeStage,
+                isStopped = { isStopped }
+            ) { transferred, total ->
+                val progress = ((transferred * 100L) / total).toInt().coerceIn(0, 99)
+                val now = System.currentTimeMillis()
+                if (progress > lastProgressValue &&
+                    (now - lastProgressAt >= 250L || progress == 99)
+                ) {
+                    jobDao.updateProgress(jobId, DownloadState.DOWNLOADING, progress)
+                    lastProgressValue = progress
+                    lastProgressAt = now
+                }
+            }
 
-            FileOutputStream(file).use { outputStream ->
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    if (isStopped) {
-                        Log.d(TAG, "Cancelled job $jobId")
-                        file.delete()
-                        response.close()
-                        jobDao.markFailed(jobId, DownloadState.CANCELLED, "Cancelled")
+            if (isStopped) {
+                rangeStage.delete()
+                jobDao.markFailed(jobId, DownloadState.CANCELLED, "Cancelled")
+                return Result.failure()
+            }
+
+            when (rangeOutcome) {
+                is ParallelRangeDownloader.Outcome.Completed -> {
+                    contentType = rangeOutcome.contentType
+                    downloadedFile = rangeOutcome.file
+                    val extension = extensionForContentType(contentType)
+                    val outputFile = File(downloadDir, "$safeFileName$extension")
+                    if (outputFile.exists() && !outputFile.delete()) {
+                        throw IOException("Could not replace the previous partial download")
+                    }
+                    if (!rangeOutcome.file.renameTo(outputFile)) {
+                        throw IOException("Could not stage the ranged download")
+                    }
+                    totalBytes = rangeOutcome.totalBytes
+                    downloadFile = outputFile
+                    downloadedFile = outputFile
+                    Log.d(TAG, "Parallel range download completed: $totalBytes bytes")
+                }
+                ParallelRangeDownloader.Outcome.Unsupported -> {
+                    rangeStage.delete()
+                    call = client.newCall(request)
+                    // CoroutineWorker.isStopped is polled in the byte-copy
+                    // loop. Cancel a blocked execute promptly when Stop is tapped.
+                    val activeCall = call!!
+                    monitorJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                        while (!isStopped) kotlinx.coroutines.delay(200)
+                        try { activeCall.cancel() } catch (_: Exception) { }
+                    }
+
+                    response = try {
+                        activeCall.execute()
+                    } catch (e: IOException) {
+                        if (isStopped) {
+                            Log.d(TAG, "Cancelled during connect for job $jobId")
+                            jobDao.markFailed(jobId, DownloadState.CANCELLED, "Cancelled")
+                            return Result.failure()
+                        }
+                        throw e
+                    }
+
+                    val activeResponse = response!!
+                    val protocol = activeResponse.protocol
+                    Log.d(TAG, "Protocol: $protocol, code: ${activeResponse.code}")
+
+                    if (activeResponse.code != 200 && activeResponse.code != 206) {
+                        // Response headers can contain signed URLs. Log only
+                        // the code and host, never the full URL or headers.
+                        Log.w(TAG, "HTTP ${activeResponse.code} from ${activeResponse.request.url.host}")
+                        val responseType = activeResponse.header("Content-Type")
+                        val contentRange = activeResponse.header("Content-Range")
+                        if (responseType != null) Log.w(TAG, "  Content-Type: $responseType")
+                        if (contentRange != null) Log.w(TAG, "  Content-Range: $contentRange")
+                        jobDao.markFailed(jobId, DownloadState.FAILED, downloadErrorForCode(activeResponse.code))
                         return Result.failure()
                     }
-                    outputStream.write(buffer, 0, bytesRead)
-                    totalBytes += bytesRead
-                    val now = System.currentTimeMillis()
-                    // Throttle DB writes; update at most every ~250 ms and when
-                    // progress actually changes.
-                    if (now - lastProgressAt >= 250) {
-                        val progress = if (contentLength > 0) {
-                            ((totalBytes * 100) / contentLength).toInt().coerceIn(0, 100)
-                        } else {
-                            // Unknown length (chunked) — synthesize a slowly
-                            // climbing progress so the UI doesn't stare at 0%.
-                            // Cap at 95% until the stream ends, then jump to 100
-                            // at completion.
-                            // Use 256 KiB per percent as a rough anchor (~25 MiB => 95%).
-                            ((totalBytes / (256 * 1024)).toInt()).coerceIn(1, 95)
-                        }
-                        if (progress != lastProgressValue) {
-                            jobDao.updateProgress(jobId, DownloadState.DOWNLOADING, progress)
-                            lastProgressValue = progress
-                            lastProgressAt = now
+
+                    val body = activeResponse.body
+                    if (body == null) {
+                        jobDao.markFailed(jobId, DownloadState.FAILED, "Empty response body")
+                        return Result.failure()
+                    }
+                    val contentLength = body.contentLength()
+                    contentType = body.contentType()?.toString().orEmpty()
+                    Log.d(TAG, "Content-Length: $contentLength, protocol: $protocol")
+                    val inputStream = body.byteStream()
+
+                    val extension = extensionForContentType(contentType)
+                    val outputFile = File(downloadDir, "$safeFileName$extension")
+                    downloadFile = outputFile
+                    downloadedFile = outputFile
+                    Log.d(TAG, "Saving as: $extension (from contentType: $contentType)")
+
+                    val buffer = ByteArray(64 * 1024)
+                    var bytesRead: Int
+                    FileOutputStream(outputFile).use { outputStream ->
+                        while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                            if (isStopped) {
+                                Log.d(TAG, "Cancelled job $jobId")
+                                outputFile.delete()
+                                jobDao.markFailed(jobId, DownloadState.CANCELLED, "Cancelled")
+                                return Result.failure()
+                            }
+                            outputStream.write(buffer, 0, bytesRead)
+                            totalBytes += bytesRead
+                            val now = System.currentTimeMillis()
+                            if (now - lastProgressAt >= 250L) {
+                                val progress = if (contentLength > 0L) {
+                                    ((totalBytes * 100L) / contentLength).toInt().coerceIn(0, 99)
+                                } else {
+                                    ((totalBytes / (256 * 1024)).toInt()).coerceIn(1, 95)
+                                }
+                                if (progress > lastProgressValue) {
+                                    jobDao.updateProgress(jobId, DownloadState.DOWNLOADING, progress)
+                                    lastProgressValue = progress
+                                    lastProgressAt = now
+                                }
+                            }
                         }
                     }
+                    activeResponse.close()
+                    response = null
                 }
             }
 
-            response.close()
-            // Ensure final progress is 99 before finalization (100 is reserved
-            // for markCompleted). This guarantees the determinate LinearProgressIndicator moves.
+            val completedFile = downloadFile ?: throw IOException("The download did not produce a file")
             if (lastProgressValue != 99 && lastProgressValue != 100) {
                 try { jobDao.updateProgress(jobId, DownloadState.DOWNLOADING, 99) } catch (_: Exception) { }
             }
-            Log.d(TAG, "Downloaded $totalBytes bytes to ${file.absolutePath}")
+            Log.d(TAG, "Downloaded $totalBytes bytes to ${completedFile.absolutePath}")
 
             val retriever = android.media.MediaMetadataRetriever()
             val durationMs = try {
-                retriever.setDataSource(file.absolutePath)
+                retriever.setDataSource(completedFile.absolutePath)
                 retriever.extractMetadata(
                     android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
                 )?.toLongOrNull() ?: 0L
@@ -231,6 +277,14 @@ class DownloadWorker(
             } finally {
                 runCatching { retriever.release() }
             }
+
+            // Keep subsequent finalization independent of which transfer path
+            // was used above.
+            downloadedFile = completedFile
+            val file = completedFile
+            val ext = ".${file.extension}".takeUnless { it == "." } ?: ".audio"
+
+            /* transfer complete; metadata/artwork and SAF finalization below */
 
             // YouTube audio streams carry no embedded album art, so fall
             // back to the video thumbnail when one was captured at enqueue
@@ -252,7 +306,7 @@ class DownloadWorker(
                 }
                 if (!thumbnailUrl.isNullOrBlank()) {
                     albumArtPath = try {
-                        artworkFetchService.fetchAndSaveImage(context, thumbnailUrl)
+                        artworkFetchService.fetchBestAndSaveImage(context, thumbnailUrl)
                     } catch (e: Exception) {
                         Log.w(TAG, "Thumbnail fetch failed for $jobId", e)
                         null
@@ -273,32 +327,36 @@ class DownloadWorker(
             // SAF copy is non-retryable as a network error — a persistent
             // DocumentsProvider failure should surface immediately instead of
             // silently cycling through QUEUED → retry → QUEUED.
-            try {
-                destinationUri = MusicFolderRepository(context).copyFileToSelectedFolder(
+            val musicFolderRepository = MusicFolderRepository(context)
+            if (musicFolderRepository.loadTreeUri().isNullOrBlank()) {
+                destinationNotice =
+                    "Saved in Luno app storage. Choose a Music folder in Settings to copy downloads there."
+            } else try {
+                destinationUri = musicFolderRepository.copyFileToSelectedFolder(
                     sourceFile = file,
                     displayName = "$safeFileName$ext",
                     mimeType = contentType.substringBefore(';').ifBlank { mimeTypeForExtension(ext) },
                     reuseExisting = false,
                     overwriteExisting = true
                 )
+                if (destinationUri == null) {
+                    destinationNotice = musicFolderRepository.destinationFailureNotice(
+                        IOException("Music folder did not create a destination")
+                    )
+                }
             } catch (e: IOException) {
-                Log.e(TAG, "SAF copy failed for job $jobId", e)
-                jobDao.markFailed(jobId, DownloadState.FAILED, "Could not save to selected music folder: ${e.message}")
-                // Do not delete staged file on SAF fatal — keep it so the
-                // app-private fallback track can still be created if needed,
-                // but fall through to the fallback path below.
-                // Instead mark failed now and let user retry or pick folder.
-                // To keep the song usable, fall back to private file if SAF throws.
-                // We only mark failed if fallback also unavailable; otherwise
-                // continue to completion using private URI.
-                // For strictness, if SAF failed but we can still use private,
-                // continue — don't treat as fatal unless both fail.
-                // So clear the exception and continue with destinationUri==null.
+                val causeType = rootCause(e).javaClass.simpleName
+                Log.e(TAG, "SAF copy failed for job $jobId ($causeType)")
+                // The downloaded app-private file remains usable. Complete
+                // against that file, and do not briefly publish FAILED while
+                // finalization is still in progress.
                 destinationUri = null
-                // Don't return failure yet — try private-file fallback.
+                destinationNotice = musicFolderRepository.destinationFailureNotice(e)
             } catch (e: Exception) {
-                Log.e(TAG, "SAF copy unexpected failure for job $jobId", e)
+                val causeType = rootCause(e).javaClass.simpleName
+                Log.e(TAG, "SAF copy failed for job $jobId ($causeType)")
                 destinationUri = null
+                destinationNotice = musicFolderRepository.destinationFailureNotice(e)
             }
             if (destinationUri != null && albumArtPath != null) {
                 val artworkFile = File(albumArtPath)
@@ -358,11 +416,12 @@ class DownloadWorker(
                         )
                     )
                 }
-                jobDao.markCompleted(
+                jobDao.markCompletedWithNotice(
                     jobId,
                     DownloadState.COMPLETED,
                     track.uri,
-                    System.currentTimeMillis()
+                    System.currentTimeMillis(),
+                    destinationNotice
                 )
             }
             if (destinationUri != null) file.delete()
@@ -402,6 +461,13 @@ class DownloadWorker(
             }
         } catch (cancelled: CancellationException) {
             cleanupFailedOutput(downloadedFile, destinationUri, artworkDestinationUri)
+            // Coroutine cancellation also cancels ordinary suspend calls. Use
+            // NonCancellable so Room cannot retain a phantom active row.
+            withContext(NonCancellable) {
+                runCatching {
+                    jobDao.markFailed(jobId, DownloadState.CANCELLED, "Cancelled")
+                }
+            }
             throw cancelled
         } catch (error: Exception) {
             Log.e(TAG, "Download finalization failed for job $jobId", error)
@@ -413,7 +479,8 @@ class DownloadWorker(
             )
             return Result.failure()
         } finally {
-            try { monitorJob.cancel() } catch (_: Exception) { }
+            try { response?.close() } catch (_: Exception) { }
+            try { monitorJob?.cancel() } catch (_: Exception) { }
         }
     }
 
@@ -441,6 +508,20 @@ class DownloadWorker(
         ".opus" -> "audio/opus"
         ".ogg" -> "audio/ogg"
         else -> "application/octet-stream"
+    }
+
+    private fun extensionForContentType(contentType: String): String = when {
+        contentType.contains("opus") || contentType.contains("webm") -> ".opus"
+        contentType.contains("mp4") || contentType.contains("m4a") -> ".m4a"
+        contentType.contains("mp3") || contentType.contains("mpeg") -> ".mp3"
+        contentType.contains("ogg") -> ".ogg"
+        else -> ".audio"
+    }
+
+    private fun rootCause(error: Throwable): Throwable {
+        var cause = error
+        while (cause.cause != null && cause.cause !== cause) cause = cause.cause!!
+        return cause
     }
 
     private fun downloadErrorForCode(code: Int): String = when (code) {

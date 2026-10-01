@@ -1,6 +1,7 @@
 package com.luno.mobile.ui.player
 
 import android.widget.Toast
+import android.content.res.Configuration
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -65,6 +66,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,6 +84,7 @@ import com.luno.mobile.playback.RecommendationPreviewManager
 import com.luno.mobile.playback.RecommendationPreviewState
 import com.luno.mobile.playback.RecommendationSaveOutcome
 import com.luno.mobile.ui.components.PlaylistPickerSheet
+import com.luno.mobile.ui.components.ArtworkImage
 import com.luno.mobile.ui.components.RecommendationArtworkImage
 import com.luno.mobile.ui.components.rememberArtworkColors
 import com.luno.mobile.ui.create.CreatePlaylistSheet
@@ -142,6 +147,7 @@ fun FullPlayerScreen(
     val repeatMode by musicController.repeatMode.collectAsState()
     val shuffleEnabled by musicController.shuffleEnabled.collectAsState()
     val context = LocalContext.current
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val app = context.applicationContext as LunoApp
     val apiKey by app.discoveryRepository.apiKey.collectAsState()
     val allTracks by app.libraryData.tracks.collectAsState()
@@ -502,6 +508,20 @@ fun FullPlayerScreen(
             index = playerListState.firstVisibleItemIndex,
             offset = playerListState.firstVisibleItemScrollOffset
         )
+    }
+
+    if (isLandscape) {
+        LandscapeArtworkPlayer(
+            artworkUri = displayArtworkUri,
+            title = displayTitle,
+            artist = displayArtist,
+            isPlaying = isPlaying,
+            onBack = onBack,
+            onPrevious = musicController::skipToPrevious,
+            onPlayPause = musicController::togglePlayPause,
+            onNext = musicController::skipToNext
+        )
+        return
     }
 
     Box(
@@ -965,6 +985,86 @@ fun FullPlayerScreen(
                 }
             )
         }
+}
+
+@Composable
+private fun LandscapeArtworkPlayer(
+    artworkUri: String?,
+    title: String,
+    artist: String,
+    isPlaying: Boolean,
+    onBack: () -> Unit,
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        ArtworkImage(
+            artworkUri = artworkUri,
+            modifier = Modifier.fillMaxSize(),
+            shape = RectangleShape,
+            placeholderIconSize = 128.dp,
+            decodeSizePx = 1440
+        )
+        Box(
+            modifier = Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.Black.copy(alpha = 0.28f),
+                        Color.Transparent,
+                        Color.Black.copy(alpha = 0.82f)
+                    )
+                )
+            )
+        )
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.align(Alignment.TopStart).padding(Dimens.paddingMedium)
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
+        }
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = Dimens.paddingXLarge, vertical = Dimens.paddingLarge),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.8f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Dimens.paddingLarge)
+            ) {
+                IconButton(onClick = onPrevious) {
+                    Icon(Icons.Filled.SkipPrevious, "Previous", tint = Color.White)
+                }
+                IconButton(onClick = onPlayPause, modifier = Modifier.size(64.dp)) {
+                    Icon(
+                        if (isPlaying) Icons.Filled.PauseCircle else Icons.Filled.PlayCircle,
+                        if (isPlaying) "Pause" else "Play",
+                        tint = Color.White,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                IconButton(onClick = onNext) {
+                    Icon(Icons.Filled.SkipNext, "Next", tint = Color.White)
+                }
+            }
+        }
+    }
 }
 
 private fun LazyListScope.fullPlayerRecommendations(

@@ -88,17 +88,27 @@ class MusicFolderImportManager(
 
         val importJob: Job = appScope.launch {
             try {
-                musicFolderRepository.saveTreeUri(treeUri)
+                val writableMusicFolder = musicFolderRepository.saveTreeUri(treeUri)
                 val result = libraryRepository.importLibraryTree(treeUri) { imported, duplicates, errors ->
                     lastTickAt.set(SystemClock.elapsedRealtime())
                     _status.value = FolderImportStatus.Importing(imported, duplicates, errors)
                 }
-                val persistWarning = if (result.persistFailures > 0) {
-                    " — storage access not persisted (${result.persistFailures}): " +
-                        "these songs may not play after a restart"
-                } else {
-                    ""
+                val warnings = buildList {
+                    if (result.persistFailures > 0) {
+                        add(
+                            "storage read access was not persisted (${result.persistFailures}); " +
+                                "some songs may not play after a restart"
+                        )
+                    }
+                    if (!writableMusicFolder) {
+                        add(
+                            "download write access is unavailable; choose the Music folder again " +
+                                "in Settings before saving downloads there"
+                        )
+                    }
                 }
+                val persistWarning = warnings.takeIf { it.isNotEmpty() }
+                    ?.joinToString(separator = " — ", prefix = " — ").orEmpty()
                 // Main-thread + guarded: a toast failure must never crash
                 // the app or flip a completed import into the "failed"
                 // state (this coroutine runs on Dispatchers.Default).

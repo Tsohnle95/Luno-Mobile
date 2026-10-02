@@ -75,7 +75,20 @@ git push origin v0.1.0
 6. The workflow verifies that the tag matches `versionName` and verifies the APK signature.
 7. A GitHub Release is created automatically with `Luno-Mobile-v0.1.0.apk` attached.
 
-The Android app's **Settings → App → Check for updates** entry reads this release tag and finds the attached APK. **Download APK** downloads it into the app cache and opens Android's package installer; the first install may require enabling **Allow Luno to install unknown apps**. Users can also download it directly from the release page.
+The Android app's **Settings → App updates** entry shows the installed version,
+checks the latest stable GitHub release and finds its attached APK. **Download &
+install** shows progress, verifies the APK, then opens Android's package installer.
+The first install may require enabling **Allow Luno to install unknown apps**;
+returning from that screen continues with the already downloaded APK. Android
+still asks the user to confirm the update. Older app versions expose the check
+under **Settings → App → Check for updates**. Users can also download directly
+from the release page.
+
+The repository and release assets must be public for the anonymous in-app
+updater. Do not embed a GitHub credential in the APK. A private repository returns
+an access failure instead of update metadata. To test an update from a phone,
+leave the preceding signed release installed, publish a newer version with the
+same key and a higher versionCode, then run the phone's update check.
 
 ## Important Signing Rule
 
@@ -120,19 +133,30 @@ Use matching release versions, increment versionCode, and verify a signed APK:
 ```
 
 [GitHubReleaseService](app/src/main/java/com/luno/mobile/data/update/GitHubReleaseService.kt)
-reads public latest-release metadata, compares normalized versions and selects
-the first APK asset. [MainShell](app/src/main/java/com/luno/mobile/ui/shell/MainShell.kt)
-invokes [ApkInstaller](app/src/main/java/com/luno/mobile/data/update/ApkInstaller.kt)
-on IO, handles errors and routes unknown-source permission to Android settings.
-The installer requires an initial HTTPS `github.com` URL and bounded bytes,
-stages in cache, then opens Android's package installer with a temporary read
-grant. Default OkHttp redirects are enabled; the app does not independently
-verify APK signature, checksum or package before opening the installer.
+reads public latest-release metadata, compares normalized versions and prefers
+the APK named for that release (falling back to the first APK asset).
+[MainShell](app/src/main/java/com/luno/mobile/ui/shell/MainShell.kt) opens
+[AppUpdateDialog](app/src/main/java/com/luno/mobile/ui/update/AppUpdateDialog.kt),
+which owns check/download progress, cancellation, errors and install permission
+continuation. Dialog work survives navigation behind it, not process death;
+verified private cache can be reused after another check without downloading again.
+[ApkInstaller](app/src/main/java/com/luno/mobile/data/update/ApkInstaller.kt)
+requires an initial HTTPS `github.com` URL under this repository's release
+download path, bounds bytes and follows only HTTPS redirects to GitHub's allowed
+release hosts. Before publishing the cache file, it checks size and SHA-256 when
+provided by release metadata, and compares Android-parsed package ID, signing
+certificates, versionName and versionCode against the installed app and release.
+It rejects a different key, another app, mismatched tag or non-increasing version
+code; Android's installer performs its own final signature/install validation.
+Opening the installer grants temporary read access to the cache file.
 [Manifest](app/src/main/AndroidManifest.xml) and
 [FileProvider paths](app/src/main/res/xml/file_paths.xml) own privileged permission
 and cache exposure. Do not describe the initial-host check as redirect validation.
 
 [GitHubReleaseServiceTest](app/src/test/java/com/luno/mobile/data/update/GitHubReleaseServiceTest.kt)
-covers metadata/version/HTTP outcomes; no installer test exists. Real permission,
-installer launch and update-over-existing-install require device evidence and
-the same signing key.
+covers metadata/version/HTTP outcomes and asset selection.
+[ApkInstallerTest](app/src/test/java/com/luno/mobile/data/update/ApkInstallerTest.kt)
+covers package/version/certificate rejection and initial URL restrictions using
+metadata values. These tests do not prove Android archive parsing, real permission,
+installer launch or an update over an existing installation; those need device
+evidence with the same signing key.

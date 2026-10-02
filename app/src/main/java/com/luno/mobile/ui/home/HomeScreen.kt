@@ -485,7 +485,7 @@ fun HomeScreen(
             HomeCategoryFilters(
                 selectedCategory = selectedCategory,
                 onCategorySelected = { selectedCategory = it },
-                modifier = Modifier.padding(top = Dimens.paddingSmall)
+                modifier = Modifier.padding(top = Dimens.paddingXLarge)
             )
         }
 
@@ -545,7 +545,7 @@ fun HomeScreen(
                                 beginSelection("p${playlist.playlist.id}")
                             }
                         },
-                        modifier = Modifier.padding(top = Dimens.paddingSmall)
+                        modifier = Modifier.padding(top = Dimens.paddingXLarge)
                     )
                 }
             }

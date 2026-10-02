@@ -94,5 +94,32 @@ class GitHubReleaseServiceTest {
         assertThat(GitHubReleaseService.compareVersions("1.2.1", "1.2.0")).isGreaterThan(0)
         assertThat(GitHubReleaseService.compareVersions("1.9.0", "2.0.0")).isLessThan(0)
         assertThat(GitHubReleaseService.compareVersions("development", "2.0.0")).isNull()
+        assertThat(GitHubReleaseService.compareVersions("99999999999999999999.0.0", "2.0.0")).isNull()
+    }
+
+    @Test
+    fun release_selectsVersionedApkAndKeepsIntegrityMetadata() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"tag_name":"v1.0.4","assets":[{"name":"other.apk","browser_download_url":"https://github.com/other.apk"},{"name":"Luno-Mobile-v1.0.4.apk","size":12345,"digest":"sha256:abc","browser_download_url":"https://github.com/Tsohnle95/Luno-Mobile/releases/download/v1.0.4/Luno-Mobile-v1.0.4.apk"}]}"""
+        ))
+        val result = service.checkForUpdate("1.0.3") as ReleaseCheckResult.UpdateAvailable
+        assertThat(result.release.apkUrl).endsWith("Luno-Mobile-v1.0.4.apk")
+        assertThat(result.release.apkSize).isEqualTo(12345L)
+        assertThat(result.release.apkDigest).isEqualTo("sha256:abc")
+        assertThat(server.takeRequest().getHeader("Authorization")).isNull()
+    }
+
+    @Test
+    fun installedVersionAheadOfLatest_isNotDowngraded() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"tag_name":"v1.0.3"}"""))
+        assertThat(service.checkForUpdate("1.0.4")).isEqualTo(ReleaseCheckResult.UpToDate("1.0.4", "1.0.3"))
+    }
+
+    @Test
+    fun unavailablePublicRelease_explainsAccessFailure() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(404))
+        assertThat(service.checkForUpdate("1.0.3")).isEqualTo(
+            ReleaseCheckResult.Failure("No public GitHub release was found for Luno-Mobile.")
+        )
     }
 }

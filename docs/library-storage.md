@@ -60,6 +60,25 @@ track fields. Repository track/playlist removal is metadata-only and must not
 unexpectedly delete source audio. Download destination publication is owned by
 [downloads](downloads.md).
 
+## Library presentation
+
+[LibraryScreen](../app/src/main/java/com/luno/mobile/ui/library/LibraryScreen.kt)
+uses the selected record-shelf direction from [the design gallery](../design/README.md).
+[LibraryHeader](../app/src/main/java/com/luno/mobile/ui/library/LibraryPresentation.kt)
+adds a full-width, faded wall of up to six distinct cached covers above the green
+body gradient. The decoration is stable across search/view/sort changes, excludes
+accessibility semantics and has no metadata or playback ownership. Cover images
+remain upright. The initial view is Playlists; direct Songs/Playlists tabs retain
+saveable view state and clear selection only when the view actually changes.
+Search and sort use the existing projections and shared `TrackSortMode` modes.
+
+[PlaylistCard](../app/src/main/java/com/luno/mobile/ui/components/PlaylistCard.kt)
+renders larger flat artwork and actual song-count/total-duration metadata. The
+virtual Favorites row has a green heart tile and no destructive actions. Existing
+selection, sync/cancellation, URL editing, clear/delete and export callbacks stay
+owned by the screen/repositories. Header playback uses the sorted, filtered song
+context and is disabled when that context is empty.
+
 ## SAF flow, failures and recovery
 
 Picker → import manager → persisted root grant + saved tree URI → bounded

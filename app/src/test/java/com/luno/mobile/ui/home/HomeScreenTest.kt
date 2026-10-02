@@ -8,7 +8,7 @@ import com.luno.mobile.data.db.entity.Playlist
 import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.playback.MediaTrack
 import com.luno.mobile.playback.PlaybackSource
-import com.luno.mobile.ui.library.formatPlaylistDuration
+import com.luno.mobile.ui.components.formatPlaylistDuration
 import org.junit.Test
 
 class HomeScreenTest {

@@ -1,35 +1,19 @@
 package com.luno.mobile.ui.library
 
 import android.widget.Toast
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -50,15 +34,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.focus.onFocusChanged
 import com.luno.mobile.LunoApp
 import com.luno.mobile.data.db.dao.PlaylistWithTracks
 import com.luno.mobile.data.db.entity.Playlist
@@ -69,13 +49,11 @@ import com.luno.mobile.playback.MusicController
 import com.luno.mobile.playback.PlaybackSource
 import com.luno.mobile.ui.components.PlaylistCard
 import com.luno.mobile.ui.components.BulkSelectionToolbar
-import com.luno.mobile.ui.components.SortChip
 import com.luno.mobile.ui.components.TrackActionsSheet
 import com.luno.mobile.ui.components.TrackRowCard
 import com.luno.mobile.ui.components.TrackSortMode
 import com.luno.mobile.ui.components.sortedByMode
 import com.luno.mobile.ui.components.sortedPlaylistsByMode
-import com.luno.mobile.ui.home.SectionHeader
 import com.luno.mobile.ui.theme.AccentGreen
 import com.luno.mobile.ui.theme.Dimens
 import com.luno.mobile.ui.theme.PrimaryText
@@ -84,14 +62,7 @@ import com.luno.mobile.ui.theme.SurfaceDark
 import com.luno.mobile.ui.theme.SurfaceElevated
 import kotlinx.coroutines.launch
 
-/**
- * Library tab modeled on the desktop "All Music" page: a centered 2x2
- * collage of the first four album covers (~60% width), a Play + Shuffle
- * row with Play and Shuffle actions (16dp apart) plus a Playlist/Song view
- * pill beneath Play, a search bar, then
- * either all songs (track card rows) or all playlists (full-width
- * playlist cards).
- */
+/** Library shelf presentation; Room projections and existing playback/actions remain authoritative. */
 @Composable
 fun LibraryScreen(
     musicController: MusicController,
@@ -113,7 +84,7 @@ fun LibraryScreen(
     val libraryLoaded by libraryData.loaded.collectAsState()
     val shuffleEnabled by musicController.shuffleEnabled.collectAsState()
     var query by rememberSaveable { mutableStateOf("") }
-    var playlistView by rememberSaveable { mutableStateOf(false) }
+    var playlistView by rememberSaveable { mutableStateOf(true) }
     var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.RECENT) }
 
     // All-or-nothing first render: hold the whole screen behind one static
@@ -268,20 +239,29 @@ fun LibraryScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().libraryShelfBackground(),
         verticalArrangement = Arrangement.spacedBy(Dimens.paddingSmall),
-        contentPadding = PaddingValues(vertical = Dimens.paddingLarge)
+        contentPadding = PaddingValues(bottom = 24.dp)
     ) {
         item {
-            Text(
-                text = "Your Library",
-                style = MaterialTheme.typography.headlineLarge,
-                color = PrimaryText,
-                modifier = Modifier.padding(
-                    start = Dimens.paddingLarge,
-                    end = Dimens.paddingLarge,
-                    bottom = Dimens.paddingSmall
-                )
+            LibraryHeader(
+                tracks = allTracks,
+                playlistCount = playlistsWithTracks.size,
+                query = query,
+                onQueryChange = { query = it },
+                playlistView = playlistView,
+                onViewChange = {
+                    if (playlistView != it) {
+                        playlistView = it
+                        exitSelection()
+                    }
+                },
+                sortMode = sortMode,
+                onSortChange = { sortMode = it },
+                canPlay = mediaTracks.isNotEmpty(),
+                shuffleEnabled = shuffleEnabled,
+                onPlay = { onPlay(mediaTracks, 0, false) },
+                onShuffle = { onPlay(mediaTracks, 0, true) }
             )
         }
 
@@ -311,163 +291,9 @@ fun LibraryScreen(
                         scope.launch { ids.forEach { app.playlistRepository.deletePlaylist(it) } }
                         exitSelection()
                     },
-                    modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                    modifier = Modifier.padding(horizontal = 24.dp)
                 )
             }
-        }
-
-        // (4-quadrant collage header disabled — see change record)
-        // Keep Play and Shuffle together so the wider view pill does not
-        // change their horizontal spacing.
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Dimens.paddingLarge),
-                verticalAlignment = Alignment.Top
-            ) {
-                Column(horizontalAlignment = Alignment.Start) {
-                    if (allTracks.isNotEmpty()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Button(
-                                // Full sorted context — next/prev walk the whole
-                                // (filtered/sorted) list, not a single track.
-                                onClick = { onPlay(mediaTracks, 0, false) },
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.PlayArrow,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(Dimens.iconSize)
-                                )
-                                Spacer(modifier = Modifier.width(Dimens.paddingSmall))
-                                Text("Play")
-                            }
-                            Spacer(modifier = Modifier.width(Dimens.paddingLarge))
-                            // Shuffle — icon + text only, no box; text in accent green
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(Dimens.cornerMedium))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = {
-                                            onPlay(mediaTracks, 0, true)
-                                        }
-                                    )
-                                    .padding(vertical = Dimens.paddingSmall),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Shuffle,
-                                    contentDescription = null,
-                                    tint = AccentGreen,
-                                    modifier = Modifier.size(Dimens.iconSize)
-                                )
-                                Spacer(modifier = Modifier.width(Dimens.paddingSmall))
-                                Text(
-                                    text = "Shuffle",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = AccentGreen,
-                                    fontWeight = if (shuffleEnabled) {
-                                        FontWeight.Bold
-                                    } else {
-                                        FontWeight.Medium
-                                    },
-                                    textDecoration = if (shuffleEnabled) {
-                                        TextDecoration.Underline
-                                    } else {
-                                        TextDecoration.None
-                                    }
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(Dimens.paddingLarge))
-                    }
-                    LibraryViewPill(
-                        playlistView = playlistView,
-                        onViewChange = { playlistView = it }
-                    )
-                    Spacer(modifier = Modifier.height(Dimens.paddingSmall))
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-                SortChip(
-                    mode = sortMode,
-                    onModeChange = { sortMode = it },
-                    compact = true,
-                    availableModes = TrackSortMode.LIBRARY_MODES
-                )
-            }
-        }
-
-        // Search bar
-        item {
-            var searchFocused by remember { mutableStateOf(false) }
-            val searchShape = RoundedCornerShape(24.dp)
-            BasicTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Dimens.paddingLarge)
-                    .height(48.dp)
-                    .clip(searchShape)
-                    .background(SurfaceDark)
-                    .border(
-                        width = 1.dp,
-                        color = if (searchFocused) AccentGreen else SurfaceElevated,
-                        shape = searchShape
-                    )
-                    .onFocusChanged { searchFocused = it.isFocused },
-                textStyle = MaterialTheme.typography.bodyMedium.copy(color = PrimaryText),
-                cursorBrush = SolidColor(AccentGreen),
-                singleLine = true,
-                decorationBox = { innerTextField ->
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Search,
-                            contentDescription = null,
-                            tint = SecondaryText,
-                            modifier = Modifier
-                                .padding(start = 12.dp)
-                                .size(19.dp)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 10.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            if (query.isBlank()) {
-                                Text(
-                                    text = "Search your library",
-                                    color = SecondaryText,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1
-                                )
-                            }
-                            innerTextField()
-                        }
-                        if (query.isNotEmpty()) {
-                            IconButton(
-                                onClick = { query = "" },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Clear,
-                                    contentDescription = "Clear search",
-                                    tint = SecondaryText,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            )
         }
 
         if (playlistView) {
@@ -478,7 +304,7 @@ fun LibraryScreen(
                         text = "Playlists (${displayPlaylists.size})",
                         style = MaterialTheme.typography.titleMedium,
                         color = PrimaryText,
-                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                        modifier = Modifier.padding(horizontal = 24.dp)
                     )
                 } else {
                     BatchSectionHeader(
@@ -504,7 +330,7 @@ fun LibraryScreen(
                         },
                         color = SecondaryText,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                        modifier = Modifier.padding(horizontal = 24.dp)
                     )
                 }
             } else {
@@ -569,7 +395,7 @@ fun LibraryScreen(
                         onExport = if (isFavoritesPlaylist) null else {
                             { onExportPlaylists(listOf(playlistWithTracks.playlist.id)) }
                         },
-                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge),
+                        modifier = Modifier.padding(horizontal = 24.dp),
                         showOptions = !isFavoritesPlaylist
                     )
                 }
@@ -582,7 +408,7 @@ fun LibraryScreen(
                         text = "Tracks (${sortedTracks.size})",
                         style = MaterialTheme.typography.titleMedium,
                         color = PrimaryText,
-                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                        modifier = Modifier.padding(horizontal = 24.dp)
                     )
                 } else {
                     BatchSectionHeader(
@@ -608,7 +434,7 @@ fun LibraryScreen(
                         },
                         color = SecondaryText,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                        modifier = Modifier.padding(horizontal = 24.dp)
                     )
                 }
             } else {
@@ -637,7 +463,7 @@ fun LibraryScreen(
                         },
                         onMenuClick = { actionsTrack = track },
                         onLongClick = { beginSelection(track.uri) },
-                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                        modifier = Modifier.padding(horizontal = 24.dp)
                     )
                 }
             }
@@ -725,51 +551,6 @@ fun LibraryScreen(
 
 }
 
-@Composable
-private fun LibraryViewPill(
-    playlistView: Boolean,
-    onViewChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(24.dp))
-            .background(SurfaceElevated)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onViewChange(!playlistView) }
-            )
-            .padding(3.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        LibraryViewPillOption(
-            label = "Playlists",
-            selected = playlistView
-        )
-        LibraryViewPillOption(
-            label = "Songs",
-            selected = !playlistView
-        )
-    }
-}
-
-@Composable
-private fun LibraryViewPillOption(
-    label: String,
-    selected: Boolean
-) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelLarge,
-        color = if (selected) Color.Black else PrimaryText,
-        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(if (selected) AccentGreen else Color.Transparent)
-            .padding(horizontal = 18.dp, vertical = 10.dp)
-    )
-}
-
 /**
  * Section header row with the 3-dot menu used to enter selection by selecting
  * all visible items. Once selection is active, BulkSelectionToolbar owns the
@@ -790,7 +571,7 @@ private fun BatchSectionHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = Dimens.paddingLarge, end = Dimens.paddingLarge),
+            .padding(start = 24.dp, end = 24.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(

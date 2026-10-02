@@ -67,6 +67,7 @@ import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.playback.MediaTrack
 import com.luno.mobile.playback.MusicController
 import com.luno.mobile.playback.PlaybackSource
+import com.luno.mobile.ui.components.formatPlaylistDuration
 import com.luno.mobile.ui.components.BulkSelectionToolbar
 import com.luno.mobile.ui.components.RecommendationArtworkImage
 import com.luno.mobile.ui.components.SortChip
@@ -517,12 +518,7 @@ private fun LunoAttribution(modifier: Modifier = Modifier) {
     }
 }
 
-internal fun formatPlaylistDuration(durationMs: Long): String {
-    val totalMinutes = durationMs.coerceAtLeast(0L) / 60_000L
-    val hours = totalMinutes / 60L
-    val minutes = totalMinutes % 60L
-    return if (hours > 0L) "$hours hr $minutes min" else "$minutes min"
-}
+
 
 @Composable
 private fun PlaylistHeader(

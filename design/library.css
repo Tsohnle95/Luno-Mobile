@@ -1919,7 +1919,7 @@ button svg {
   align-content: start;
   gap: 2px;
   opacity: .48;
-  mask-image: linear-gradient(to bottom, #000 0%, #000 45%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 100%);
 }
 .selected-preview .shelf-cover-wall .art {
   width: 100%;

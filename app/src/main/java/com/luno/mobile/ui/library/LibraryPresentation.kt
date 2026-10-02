@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -100,7 +101,8 @@ internal fun LibraryHeader(
     canPlay: Boolean,
     shuffleEnabled: Boolean,
     onPlay: () -> Unit,
-    onShuffle: () -> Unit
+    onShuffle: () -> Unit,
+    sectionHeader: @Composable () -> Unit
 ) {
     // Artwork is stable while searching, sorting or switching views; it is decoration,
     // never a new projection or a source of playback/metadata state.
@@ -111,13 +113,13 @@ internal fun LibraryHeader(
     BoxWithConstraints(Modifier.fillMaxWidth().clipToBounds()) {
         val coverSize = maxWidth / 3
         if (heroTracks.isNotEmpty()) {
-            Column(
+            BoxWithConstraints(
                 Modifier.matchParentSize()
                     .clearAndSetSemantics { }
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithCache {
                         val fade = Brush.verticalGradient(
-                            colorStops = arrayOf(0f to Color.Black, 0.25f to Color.Black, 1f to Color.Transparent)
+                            colorStops = arrayOf(0f to Color.Black, 0.55f to Color.Black, 1f to Color.Transparent)
                         )
                         onDrawWithContent {
                             drawContent()
@@ -129,8 +131,10 @@ internal fun LibraryHeader(
             ) {
                 // Background tiles get an explicit square size. Parent height must
                 // never compress the last row into shorter, uneven covers.
-                Column(Modifier.fillMaxWidth().requiredHeight(coverSize * 2)) {
-                    repeat(2) { row ->
+                val coverRows = kotlin.math.ceil(maxHeight / coverSize).toInt().coerceAtLeast(2)
+                Column(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true)
+                    .requiredHeight(coverSize * coverRows)) {
+                    repeat(coverRows) { row ->
                         Row(Modifier.fillMaxWidth().height(coverSize)) {
                             repeat(3) { col ->
                                 val track = heroTracks[(row * 3 + col) % heroTracks.size]
@@ -157,43 +161,49 @@ internal fun LibraryHeader(
         Box(Modifier.matchParentSize().background(Brush.verticalGradient(
             listOf(PrimaryBackground.copy(alpha = 0.5f), AppBackgroundGreen.copy(alpha = 0.65f), Color.Transparent)
         )))
-        Column(
-            Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 4.dp)
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Your Library", style = MaterialTheme.typography.headlineLarge.copy(
-                        fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = (-1).sp
-                    ), color = PrimaryText)
-                    Spacer(Modifier.height(9.dp))
-                    Text("${tracks.size} songs · $playlistCount playlists",
-                        style = MaterialTheme.typography.bodySmall, color = SecondaryText)
+        Column(Modifier.fillMaxWidth()) {
+            Column(
+                Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 4.dp)
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Your Library", style = MaterialTheme.typography.headlineLarge.copy(
+                            fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = (-1).sp
+                        ), color = PrimaryText)
+                        Spacer(Modifier.height(9.dp))
+                        Text("${tracks.size} songs · $playlistCount playlists",
+                            style = MaterialTheme.typography.bodySmall, color = SecondaryText)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    IconButton(
+                        onClick = onPlay,
+                        enabled = canPlay,
+                        modifier = Modifier.size(40.dp).clip(CircleShape)
+                            .background(if (canPlay) AccentGreen else SurfaceDark)
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, "Play library",
+                            tint = if (canPlay) Color.Black else SecondaryText, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(onClick = onShuffle, enabled = canPlay, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Filled.Shuffle, "Shuffle library",
+                            tint = if (shuffleEnabled && canPlay) AccentGreen else SecondaryText,
+                            modifier = Modifier.size(22.dp))
+                    }
                 }
-                Spacer(Modifier.width(12.dp))
-                IconButton(
-                    onClick = onPlay,
-                    enabled = canPlay,
-                    modifier = Modifier.size(40.dp).clip(CircleShape)
-                        .background(if (canPlay) AccentGreen else SurfaceDark)
-                ) {
-                    Icon(Icons.Filled.PlayArrow, "Play library",
-                        tint = if (canPlay) Color.Black else SecondaryText, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.height(30.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    LibraryViewTabs(playlistView, onViewChange, Modifier.weight(1f))
+                    Spacer(Modifier.width(12.dp))
+                    LibrarySortMenu(sortMode, onSortChange, Modifier.width(124.dp))
                 }
-                Spacer(Modifier.width(4.dp))
-                IconButton(onClick = onShuffle, enabled = canPlay, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.Filled.Shuffle, "Shuffle library",
-                        tint = if (shuffleEnabled && canPlay) AccentGreen else SecondaryText,
-                        modifier = Modifier.size(22.dp))
-                }
+                Spacer(Modifier.height(22.dp))
+                LibrarySearch(query, onQueryChange)
             }
-            Spacer(Modifier.height(30.dp))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                LibraryViewTabs(playlistView, onViewChange, Modifier.weight(1f))
-                Spacer(Modifier.width(12.dp))
-                LibrarySortMenu(sortMode, onSortChange, Modifier.width(124.dp))
-            }
-            Spacer(Modifier.height(22.dp))
-            LibrarySearch(query, onQueryChange)
+            Spacer(Modifier.height(8.dp))
+            // The artwork ends at the measured section boundary, immediately before
+            // the first playlist, rather than at the search field or a fixed height.
+            sectionHeader()
         }
     }
 }

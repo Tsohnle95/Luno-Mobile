@@ -67,7 +67,10 @@ uses the selected record-shelf direction from [the design gallery](../design/REA
 [LibraryHeader](../app/src/main/java/com/luno/mobile/ui/library/LibraryPresentation.kt)
 adds a full-width, faded wall of up to six distinct cached covers above the green
 body gradient. Library owns its header; the shell omits the Luno wordmark here.
-The six covers use equal square tiles independently of the foreground height.
+The covers use equal square tiles independently of the foreground height; rows
+repeat to cover the measured hero. The hero includes the playlist/song section
+heading and fades out immediately before the first content row, keeping artwork
+behind the complete header without shifting the controls or playlist positions.
 The decoration is stable across search/view/sort changes, excludes
 accessibility semantics and has no metadata or playback ownership. Cover images
 remain upright. The initial view is Playlists; direct Songs/Playlists tabs retain

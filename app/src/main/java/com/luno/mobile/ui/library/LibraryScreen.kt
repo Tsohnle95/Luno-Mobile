@@ -3,6 +3,9 @@ package com.luno.mobile.ui.library
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -262,64 +265,64 @@ fun LibraryScreen(
                 shuffleEnabled = shuffleEnabled,
                 onPlay = { onPlay(mediaTracks, 0, false) },
                 onShuffle = { onPlay(mediaTracks, 0, true) }
-            )
-        }
-
-        if (selectionMode) {
-            item {
-                BulkSelectionToolbar(
-                    selectedTracks = selectedTracks,
-                    selectedPlaylists = selectedPlaylists,
-                    allSelected = allSelected,
-                    onSelectAll = ::setAllVisibleSelected,
-                    onDismiss = ::exitSelection,
-                    onAddToPlaylist = ::addSelectionToPlaylist,
-                    onCreatePlaylist = ::createPlaylistFromSelection,
-                    onExportTracks = { uris ->
-                        onExportTracks(uris)
-                        exitSelection()
-                    },
-                    onExportPlaylists = { ids ->
-                        onExportPlaylists(ids)
-                        exitSelection()
-                    },
-                    onRemoveTracks = { uris ->
-                        scope.launch { uris.forEach { app.libraryRepository.deleteTrack(it) } }
-                        exitSelection()
-                    },
-                    onDeletePlaylists = { ids ->
-                        scope.launch { ids.forEach { app.playlistRepository.deletePlaylist(it) } }
-                        exitSelection()
-                    },
-                    modifier = Modifier.padding(horizontal = 24.dp)
-                )
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(Dimens.paddingSmall)) {
+                    if (selectionMode) {
+                        BulkSelectionToolbar(
+                            selectedTracks = selectedTracks,
+                            selectedPlaylists = selectedPlaylists,
+                            allSelected = allSelected,
+                            onSelectAll = ::setAllVisibleSelected,
+                            onDismiss = ::exitSelection,
+                            onAddToPlaylist = ::addSelectionToPlaylist,
+                            onCreatePlaylist = ::createPlaylistFromSelection,
+                            onExportTracks = { uris ->
+                                onExportTracks(uris)
+                                exitSelection()
+                            },
+                            onExportPlaylists = { ids ->
+                                onExportPlaylists(ids)
+                                exitSelection()
+                            },
+                            onRemoveTracks = { uris ->
+                                scope.launch { uris.forEach { app.libraryRepository.deleteTrack(it) } }
+                                exitSelection()
+                            },
+                            onDeletePlaylists = { ids ->
+                                scope.launch { ids.forEach { app.playlistRepository.deletePlaylist(it) } }
+                                exitSelection()
+                            },
+                            modifier = Modifier.padding(horizontal = 24.dp)
+                        )
+                    }
+                    val sectionTitle = if (playlistView) "Playlists (${displayPlaylists.size})"
+                        else "Tracks (${sortedTracks.size})"
+                    if (selectionMode) {
+                        Text(
+                            text = sectionTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = PrimaryText,
+                            modifier = Modifier.padding(horizontal = 24.dp)
+                        )
+                    } else {
+                        BatchSectionHeader(
+                            title = sectionTitle,
+                            showMenu = showBatchMenu,
+                            onMenuToggle = { showBatchMenu = !showBatchMenu },
+                            onMenuDismiss = { showBatchMenu = false },
+                            selectionMode = false,
+                            selectedCount = 0,
+                            onSelectAll = { setAllVisibleSelected(true) },
+                            onOptions = {},
+                            onCancelSelection = ::exitSelection
+                        )
+                    }
+                }
             }
         }
 
         if (playlistView) {
             // Playlist view — all playlists, full-width cards
-            item {
-                if (selectionMode) {
-                    Text(
-                        text = "Playlists (${displayPlaylists.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = PrimaryText,
-                        modifier = Modifier.padding(horizontal = 24.dp)
-                    )
-                } else {
-                    BatchSectionHeader(
-                        title = "Playlists (${displayPlaylists.size})",
-                        showMenu = showBatchMenu,
-                        onMenuToggle = { showBatchMenu = !showBatchMenu },
-                        onMenuDismiss = { showBatchMenu = false },
-                        selectionMode = false,
-                        selectedCount = 0,
-                        onSelectAll = { setAllVisibleSelected(true) },
-                        onOptions = {},
-                        onCancelSelection = ::exitSelection
-                    )
-                }
-            }
             if (displayPlaylists.isEmpty()) {
                 item {
                     Text(
@@ -402,28 +405,6 @@ fun LibraryScreen(
             }
         } else {
             // All-songs view — every track in the track card layout
-            item {
-                if (selectionMode) {
-                    Text(
-                        text = "Tracks (${sortedTracks.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = PrimaryText,
-                        modifier = Modifier.padding(horizontal = 24.dp)
-                    )
-                } else {
-                    BatchSectionHeader(
-                        title = "Tracks (${sortedTracks.size})",
-                        showMenu = showBatchMenu,
-                        onMenuToggle = { showBatchMenu = !showBatchMenu },
-                        onMenuDismiss = { showBatchMenu = false },
-                        selectionMode = false,
-                        selectedCount = 0,
-                        onSelectAll = { setAllVisibleSelected(true) },
-                        onOptions = {},
-                        onCancelSelection = ::exitSelection
-                    )
-                }
-            }
             if (sortedTracks.isEmpty()) {
                 item {
                     Text(

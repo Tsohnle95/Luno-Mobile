@@ -99,6 +99,7 @@ import com.luno.mobile.playback.NotificationPermissionPolicy
 import com.luno.mobile.ui.components.MiniPlayer
 import com.luno.mobile.ui.create.CreatePlaylistSheet
 import com.luno.mobile.ui.discover.LastfmKeyDialog
+import com.luno.mobile.ui.library.libraryShelfBackground
 import com.luno.mobile.ui.navigation.LunoNavHost
 import com.luno.mobile.ui.navigation.Routes
 import com.luno.mobile.ui.theme.AccentGreen
@@ -651,7 +652,15 @@ fun MainShell(
             modifier = Modifier
                 .fillMaxSize()
                 .background(PrimaryBackground)
-                .appBackgroundWash()
+                // Use one library canvas behind both its content and the
+                // transparent status bar so the green glow stays continuous.
+                .then(
+                    if (currentRoute == Routes.LIBRARY) {
+                        Modifier.libraryShelfBackground()
+                    } else {
+                        Modifier.appBackgroundWash()
+                    }
+                )
         ) {
             Scaffold(
                 // Let the shell wash show through the screen content while

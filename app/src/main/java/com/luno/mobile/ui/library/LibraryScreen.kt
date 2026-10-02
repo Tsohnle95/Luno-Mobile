@@ -240,7 +240,7 @@ fun LibraryScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().libraryShelfBackground(),
+        modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(Dimens.paddingSmall),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {

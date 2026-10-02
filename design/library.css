@@ -1902,49 +1902,13 @@ button svg {
   }
 }
 
-/* Selected direction: 10's shelf/body gradient with 06's faded artwork bleed. */
-.selected-preview .shelf-hero {
-  position: relative;
-  isolation: isolate;
-  margin: -24px -24px 0;
-  padding: 24px 24px 0;
-  overflow: hidden;
-}
-.selected-preview .shelf-cover-wall {
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  align-content: start;
-  gap: 2px;
-  opacity: .48;
-  mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 100%);
-}
-.selected-preview .shelf-cover-wall .art {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 1;
-  border-radius: 0;
-  transform: scale(1.4);
-}
-.selected-preview .shelf-cover-wall > span { display:block; overflow:hidden; aspect-ratio:1; }
-.selected-preview .shelf-hero::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: linear-gradient(to bottom, #10101080, #102b1ca6 50%, transparent);
-}
+/* App target: original 10, upright artwork, current search and Favorites. */
 .selected-preview .record-sleeves .playlist-main .art,
 .selected-preview .record-sleeves .playlist-card:nth-child(even) .art,
 .selected-preview .record-sleeves.song-results .art {
   transform: none;
 }
-@media(max-width:350px) {
-  .selected-preview .shelf-hero { margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; }
-}
+
 
 /* The app target is separate; concepts 01–10 retain their original designs. */
 .selected-preview .search-line { margin-bottom: 24px; }

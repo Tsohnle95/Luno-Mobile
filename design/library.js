@@ -74,7 +74,7 @@ const layouts = {
 };
 const selectedPreview = concept.id === '10' && params.get('preview') === 'selected';
 if (selectedPreview) {
-  layouts['10'] = () => `<section class="shelf-hero"><div class="shelf-cover-wall" aria-hidden="true">${[1,2,3,8,5,6,1,2,3].map(n=>`<span>${art(n)}</span>`).join('')}</div><div class="shelf-heading">${title('play')}${shuffle(false)}</div><div class="view-line">${tabs('underline')}${sort()}</div>${search('search-line')}${head('Your collection')}</section>${results('record-sleeves')}`;
+  layouts['10'] = () => `<div class="shelf-heading">${title('play')}${shuffle(false)}</div><div class="view-line">${tabs('underline')}${sort()}</div>${search('search-line')}${head('Your collection')}${results('record-sleeves')}`;
   phone.classList.add('selected-preview');
 }
 phone.classList.add(`concept-${concept.className}`);

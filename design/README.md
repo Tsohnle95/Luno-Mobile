@@ -14,12 +14,11 @@ are visual references for the existing app chrome.
 
 ## Selected direction
 
-**10 / Record shelf** is selected, with **06 / Artwork canopy**'s faded artwork
-hero. The green gradient in 10's body remains. Every playlist/track cover stays
-flat and upright. The app uses concept 05's underline search and an ordinary
-Favorites row. [Preview the current app target](concept.html?concept=10&preview=selected).
+**10 / Record shelf** is selected with straight artwork, the current underline
+search input and the current ordinary Favorites row. The app uses 10's original
+green background and shelf layout. [Preview the current app target](concept.html?concept=10&preview=selected).
 All ten numbered concepts retain the original designs shown when you chose;
-the combined target has its own preview and does not replace concept 10.
+the app target has its own preview and does not replace concept 10.
 
 ## Theme
 

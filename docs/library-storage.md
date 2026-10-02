@@ -65,15 +65,10 @@ unexpectedly delete source audio. Download destination publication is owned by
 [LibraryScreen](../app/src/main/java/com/luno/mobile/ui/library/LibraryScreen.kt)
 uses the selected record-shelf direction from [the design gallery](../design/README.md).
 [LibraryHeader](../app/src/main/java/com/luno/mobile/ui/library/LibraryPresentation.kt)
-adds a full-width, faded wall of up to six distinct cached covers above the green
-body gradient. Library owns its header; the shell omits the Luno wordmark here.
-The covers use equal square tiles independently of the foreground height; rows
-repeat to cover the measured hero. The hero includes the playlist/song section
-heading and fades out immediately before the first content row, keeping artwork
-behind the complete header without shifting the controls or playlist positions.
-The decoration is stable across search/view/sort changes, excludes
-accessibility semantics and has no metadata or playback ownership. Cover images
-remain upright. The initial view is Playlists; direct Songs/Playlists tabs retain
+uses concept 10's title, playback cluster and view/sort line over its green corner
+light and faint horizontal shelves. Library owns its header; the shell omits the
+Luno wordmark here. Playlist artwork remains upright.
+The initial view is Playlists; direct Songs/Playlists tabs retain
 saveable view state and clear selection only when the view actually changes.
 Search has the underline treatment from concept 05; search and sort use the
 existing projections and shared `TrackSortMode` modes. Header counts include

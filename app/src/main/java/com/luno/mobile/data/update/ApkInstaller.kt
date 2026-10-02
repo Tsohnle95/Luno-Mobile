@@ -1,10 +1,8 @@
 package com.luno.mobile.data.update
 
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
-import androidx.core.content.FileProvider
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -18,12 +16,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import kotlin.coroutines.coroutineContext
-
-sealed interface ApkInstallResult {
-    data object InstallerOpened : ApkInstallResult
-    data object UnknownSourcesPermissionRequired : ApkInstallResult
-    data class Failure(val message: String) : ApkInstallResult
-}
 
 internal data class ApkIdentity(
     val packageName: String,
@@ -56,9 +48,10 @@ object ApkInstaller {
     suspend fun download(
         context: Context,
         release: GitHubRelease,
+        target: File = File(context.cacheDir, "luno-update.apk"),
+        onVerifying: () -> Unit = {},
         onProgress: (downloaded: Long, total: Long) -> Unit = { _, _ -> }
     ): File = withContext(Dispatchers.IO) {
-        val target = File(context.cacheDir, "luno-update.apk")
         if (target.isFile && runCatching { verify(context, target, release) }.isSuccess) {
             onProgress(target.length(), target.length())
             return@withContext target
@@ -88,26 +81,12 @@ object ApkInstaller {
                     }
                 }
             }
+            onVerifying()
             verify(context, temporary, release)
             if (!temporary.renameTo(target)) temporary.copyTo(target, overwrite = true)
             target
         } finally {
             temporary.delete()
-        }
-    }
-
-    fun openInstaller(context: Context, file: File): ApkInstallResult {
-        if (!file.isFile) return ApkInstallResult.Failure("The downloaded update is missing. Download it again.")
-        if (!context.packageManager.canRequestPackageInstalls()) return ApkInstallResult.UnknownSourcesPermissionRequired
-        return try {
-            val contentUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            context.startActivity(Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(contentUri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
-            ApkInstallResult.InstallerOpened
-        } catch (_: Exception) {
-            ApkInstallResult.Failure("Android could not open the update installer. Try again.")
         }
     }
 
@@ -137,7 +116,7 @@ object ApkInstaller {
     }
 
     @Suppress("DEPRECATION")
-    private fun verify(context: Context, file: File, release: GitHubRelease) {
+    internal fun verify(context: Context, file: File, release: GitHubRelease) {
         if (file.length() <= 0L || file.length() > MAX_APK_BYTES) throw IOException("The downloaded APK is incomplete")
         if (release.apkSize > 0L && file.length() != release.apkSize) throw IOException("The downloaded APK is incomplete")
         release.apkDigest?.let { digest ->

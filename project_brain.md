@@ -43,7 +43,7 @@ independent state/contracts/lifecycle and recurring routing value warrant it.
 ## Architecture and data flow
 
 `LunoApp` owns application-scoped repositories, eagerly observed `LibraryData`,
-import/artwork managers, recommendation previews and its process-lifetime
+import/artwork managers, recommendation previews, the app update manager and its process-lifetime
 `SupervisorJob` scope. It initializes Room, NewPipe and WorkManager configuration,
 starts download reconciliation/repair, and captures uncaught crashes locally.
 `MainActivity` creates/attaches/releases `MusicController`; `MusicService`
@@ -87,6 +87,11 @@ App-process imports/previews survive navigation, not process death. Durable
 download execution belongs to WorkManager; startup reconciliation bridges its
 state back to Room. Service restore and recents use private preferences. Keep
 these distinct recovery owners when changing lifetimes.
+
+App updates use a separate private transaction/receipt store, unique WorkManager
+APK download and Android PackageInstaller session. Compose delegates to the
+application-scoped manager; actual installed version confirms success after
+process replacement. [Releases](ANDROID_RELEASES.md) owns these recovery rules.
 
 Desktop development lives at
 https://github.com/Tsohnle95/Luno-Desktop. The archived Python/Tkinter

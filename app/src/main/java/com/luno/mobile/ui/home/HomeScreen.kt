@@ -27,13 +27,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -153,7 +153,7 @@ internal fun recentlyPlayedPlaylists(
 
 /**
  * Home greeting, a persisted recent-playlist grid, and the existing local
- * library carousels. Settings is opened from the gear beside the greeting.
+ * library carousels. Settings is opened from the profile icon beside the greeting.
  */
 @Composable
 fun HomeScreen(
@@ -987,8 +987,8 @@ private fun HomeHero(
         }
         IconButton(onClick = onOpenSettings, modifier = Modifier.size(40.dp)) {
             Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = "Settings",
+                imageVector = Icons.Filled.AccountCircle,
+                contentDescription = "Profile and settings",
                 tint = PrimaryText,
                 modifier = Modifier.size(Dimens.iconSize)
             )

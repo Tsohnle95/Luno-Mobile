@@ -75,14 +75,22 @@ git push origin v0.1.0
 6. The workflow verifies that the tag matches `versionName` and verifies the APK signature.
 7. A GitHub Release is created automatically with `Luno-Mobile-v0.1.0.apk` attached.
 
-The Android app's **Settings → App updates** entry shows the installed version,
-checks the latest stable GitHub release and finds its attached APK. **Download &
-install** shows progress, verifies the APK, then opens Android's package installer.
-The first install may require enabling **Allow Luno to install unknown apps**;
-returning from that screen continues with the already downloaded APK. Android
-still asks the user to confirm the update. Older app versions expose the check
-under **Settings → App → Check for updates**. Users can also download directly
-from the release page.
+The Android app's **Home profile → Settings → App → App updates** entry shows
+the installed version and checks the latest stable GitHub release. **Download &
+install** requests Android's install permission first when needed. Enable **Allow
+from this source** and return to Luno; the download starts automatically. The
+screen shows percent/bytes, verification and installation preparation separately.
+Closing the screen keeps the WorkManager download running; a status banner lets
+you reopen it. **Cancel update** explicitly cancels the download. Android asks
+for confirmation and displays installation progress. Reopen Luno after installing
+to see **Updated successfully** with the actual installed version. That receipt
+stays until acknowledged. Installation cancellation/failure keeps the verified
+APK for retry. Users can also download directly from the release page.
+
+The updater performing an upgrade is the version already installed. Updating
+from 1.0.4 uses its existing download screen; 1.0.5 confirms success on first
+launch and uses the persistent permission/download/session flow for subsequent
+updates. Fresh installations do not display an update success receipt.
 
 The repository and release assets must be public for the anonymous in-app
 updater. Do not embed a GitHub credential in the APK. A private repository returns
@@ -135,11 +143,31 @@ Use matching release versions, increment versionCode, and verify a signed APK:
 [GitHubReleaseService](app/src/main/java/com/luno/mobile/data/update/GitHubReleaseService.kt)
 reads public latest-release metadata, compares normalized versions and prefers
 the APK named for that release (falling back to the first APK asset).
-[MainShell](app/src/main/java/com/luno/mobile/ui/shell/MainShell.kt) opens
-[AppUpdateDialog](app/src/main/java/com/luno/mobile/ui/update/AppUpdateDialog.kt),
-which owns check/download progress, cancellation, errors and install permission
-continuation. Dialog work survives navigation behind it, not process death;
-verified private cache can be reused after another check without downloading again.
+[LunoApp](app/src/main/java/com/luno/mobile/LunoApp.kt) owns
+[AppUpdateManager](app/src/main/java/com/luno/mobile/data/update/AppUpdateManager.kt).
+[MainShell](app/src/main/java/com/luno/mobile/ui/shell/MainShell.kt) renders its
+[AppUpdateHost](app/src/main/java/com/luno/mobile/ui/update/AppUpdateDialog.kt)
+and status banner; the dialog delegates mutations. A private preferences
+[UpdateTransactionStore](app/src/main/java/com/luno/mobile/data/update/UpdateTransactionStore.kt)
+persists release identity, baseline installed code, worker/session IDs,
+confirmation handoff and the acknowledged receipt. It is excluded from the
+database-only backup rules and never changes Room metadata. One unique
+[AppUpdateWorker](app/src/main/java/com/luno/mobile/data/update/AppUpdateWorker.kt)
+owns download/verification and durable WorkManager byte progress. Per-worker
+cache files keep obsolete downloads separate; a missing cache can be downloaded
+again. Permission continuation is idempotent and only enqueues from its pending
+phase. Startup repairs the gap between saving a transaction and enqueueing work.
+
+Android PackageInstaller sessions own native confirmation and installation.
+[UpdateInstallReceiver](app/src/main/java/com/luno/mobile/data/update/UpdateInstallReceiver.kt)
+is an internal explicit mutable PendingIntent target. Persist session identity
+before commit and ignore stale session/worker results. Open native confirmation
+only from a resumed update screen. Interrupted preparation abandons its session
+and keeps the verified cache for retry; an already committed session can recover
+its confirmation handoff. Success is reconciled against PackageManager's actual
+installed version/code, not an activity handoff. First launch from older updaters
+uses Android's installation timestamps to bootstrap the receipt; acknowledgement
+and seen version prevent repeating it on subsequent launches.
 [ApkInstaller](app/src/main/java/com/luno/mobile/data/update/ApkInstaller.kt)
 requires an initial HTTPS `github.com` URL under this repository's release
 download path, bounds bytes and follows only HTTPS redirects to GitHub's allowed
@@ -148,15 +176,21 @@ provided by release metadata, and compares Android-parsed package ID, signing
 certificates, versionName and versionCode against the installed app and release.
 It rejects a different key, another app, mismatched tag or non-increasing version
 code; Android's installer performs its own final signature/install validation.
-Opening the installer grants temporary read access to the cache file.
+The APK is verified again before copying into Android's private install session.
 [Manifest](app/src/main/AndroidManifest.xml) and
-[FileProvider paths](app/src/main/res/xml/file_paths.xml) own privileged permission
-and cache exposure. Do not describe the initial-host check as redirect validation.
+[FileProvider paths](app/src/main/res/xml/file_paths.xml) own privileged permission,
+receiver registration and legacy cache exposure. Do not describe the initial-host
+check as redirect validation.
 
 [GitHubReleaseServiceTest](app/src/test/java/com/luno/mobile/data/update/GitHubReleaseServiceTest.kt)
 covers metadata/version/HTTP outcomes and asset selection.
 [ApkInstallerTest](app/src/test/java/com/luno/mobile/data/update/ApkInstallerTest.kt)
-covers package/version/certificate rejection and initial URL restrictions using
-metadata values. These tests do not prove Android archive parsing, real permission,
-installer launch or an update over an existing installation; those need device
-evidence with the same signing key.
+covers package/version/certificate rejection and initial URL restrictions.
+[AppUpdateManagerTest](app/src/test/java/com/luno/mobile/data/update/AppUpdateManagerTest.kt)
+and [UpdateTransactionStoreTest](app/src/test/java/com/luno/mobile/data/update/UpdateTransactionStoreTest.kt)
+cover permission return without duplicate enqueue, cached retry/recovery, native
+session result filtering, persisted confirmation and one-time installed-version
+receipts. These checks use Robolectric and controlled workers; they do not prove
+Android archive parsing, real permission, native installer launch or a signed
+update over an existing installation. Those require device evidence with the
+same signing key.

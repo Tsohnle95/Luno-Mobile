@@ -90,7 +90,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.luno.mobile.BuildConfig
 import com.luno.mobile.R
-import com.luno.mobile.ui.update.AppUpdateDialog
+import com.luno.mobile.ui.update.AppUpdateHost
+import com.luno.mobile.ui.update.AppUpdateBanner
 import com.luno.mobile.data.export.LibraryManifest
 import com.luno.mobile.playback.MediaTrack
 import com.luno.mobile.playback.MusicController
@@ -470,15 +471,6 @@ fun MainShell(
                     )
                 )
 
-                DrawerItem(
-                    icon = Icons.Filled.SystemUpdate,
-                    label = "App updates · ${BuildConfig.VERSION_NAME}",
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                        showAppUpdates = true
-                    }
-                )
-
                 SettingsAccordion(
                     title = "Library",
                     icon = Icons.Filled.Folder,
@@ -637,6 +629,14 @@ fun MainShell(
                         }
                     )
                     DrawerItem(
+                        icon = Icons.Filled.SystemUpdate,
+                        label = "App updates · ${BuildConfig.VERSION_NAME}",
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            showAppUpdates = true
+                        }
+                    )
+                    DrawerItem(
                         icon = Icons.Filled.BugReport,
                         label = "Error log",
                         onClick = {
@@ -696,6 +696,9 @@ fun MainShell(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
+                    if (!showAppUpdates) {
+                        AppUpdateBanner(app.appUpdateManager, onOpen = { showAppUpdates = true })
+                    }
                     // Home uses its compact greeting/settings row. Playlist
                     // detail uses a full-width artwork header with its own
                     // overlaid back control.
@@ -937,9 +940,7 @@ fun MainShell(
                 )
             }
 
-            if (showAppUpdates) {
-                AppUpdateDialog(onDismiss = { showAppUpdates = false })
-            }
+            AppUpdateHost(app.appUpdateManager, isOpen = showAppUpdates, onDismiss = { showAppUpdates = false })
         }
     }
 }

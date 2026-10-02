@@ -89,6 +89,8 @@ class LunoApp : Application(), Configuration.Provider {
      */
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    val appUpdateManager by lazy { com.luno.mobile.data.update.AppUpdateManager(this, appScope) }
+
     fun setMadeForYouTracks(tracks: List<Track>) {
         madeForYouTracksState.value = tracks
     }

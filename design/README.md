@@ -16,8 +16,10 @@ are visual references for the existing app chrome.
 
 **10 / Record shelf** is selected, with **06 / Artwork canopy**'s faded artwork
 hero. The green gradient in 10's body remains. Every playlist/track cover stays
-flat and upright. Concept 10's preview reflects this combination; the other nine
-remain available for comparison.
+flat and upright. The app uses concept 05's underline search and an ordinary
+Favorites row. [Preview the current app target](concept.html?concept=10&preview=selected).
+All ten numbered concepts retain the original designs shown when you chose;
+the combined target has its own preview and does not replace concept 10.
 
 ## Theme
 
@@ -51,7 +53,7 @@ Library footer. Artwork provides colour; navigation and controls keep Luno green
 | 07 | [Side column](concept.html?concept=07) | Vertical Songs/Playlists rail alongside the list |
 | 08 | [Library blocks](concept.html?concept=08) | Large overview tiles that act as the view switch |
 | 09 | [One toolbar](concept.html?concept=09) | Search and Play on one surface, spacious song cards |
-| 10 | [Record shelf](concept.html?concept=10) | Selected: upright playlist sleeves, faded artwork hero and green body gradient |
+| 10 | [Record shelf](concept.html?concept=10) | Original playlist sleeves, large artwork and subtle shelf lines |
 
 ## Files
 

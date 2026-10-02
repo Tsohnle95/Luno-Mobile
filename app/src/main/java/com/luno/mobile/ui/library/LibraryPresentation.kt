@@ -1,18 +1,19 @@
 package com.luno.mobile.ui.library
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -56,6 +57,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.ui.components.ArtworkImage
 import com.luno.mobile.ui.components.TrackSortMode
@@ -69,7 +71,7 @@ import com.luno.mobile.ui.theme.SurfaceDark
 /** The shelf's green atmosphere stays behind the list as the artwork header scrolls away. */
 internal fun Modifier.libraryShelfBackground(): Modifier = drawWithCache {
     val upperGlow = Brush.radialGradient(
-        colors = listOf(AppBackgroundGreen, AppBackgroundGreen.copy(alpha = 0.45f), Color.Transparent),
+        colors = listOf(Color(0xFF19472D), Color(0xFF19472D).copy(alpha = 0.6f), Color.Transparent),
         center = Offset(size.width * 0.65f, size.height * 0.12f),
         radius = size.maxDimension * 0.85f
     )
@@ -106,7 +108,8 @@ internal fun LibraryHeader(
         tracks.asSequence().filter { !it.albumArtPath.isNullOrBlank() }
             .distinctBy { it.albumArtPath }.take(6).toList()
     }
-    Box(Modifier.fillMaxWidth().clipToBounds()) {
+    BoxWithConstraints(Modifier.fillMaxWidth().clipToBounds()) {
+        val coverSize = maxWidth / 3
         if (heroTracks.isNotEmpty()) {
             Column(
                 Modifier.matchParentSize()
@@ -114,7 +117,7 @@ internal fun LibraryHeader(
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithCache {
                         val fade = Brush.verticalGradient(
-                            colorStops = arrayOf(0f to Color.Black, 0.45f to Color.Black, 1f to Color.Transparent)
+                            colorStops = arrayOf(0f to Color.Black, 0.25f to Color.Black, 1f to Color.Transparent)
                         )
                         onDrawWithContent {
                             drawContent()
@@ -124,17 +127,28 @@ internal fun LibraryHeader(
                         }
                     }
             ) {
-                repeat(2) { row ->
-                    Row(Modifier.fillMaxWidth()) {
-                        repeat(3) { col ->
-                            val track = heroTracks[(row * 3 + col) % heroTracks.size]
-                            ArtworkImage(
-                                artworkUri = track.albumArtUri(),
-                                shape = RectangleShape,
-                                decodeSizePx = 384,
-                                modifier = Modifier.weight(1f).aspectRatio(1f)
-                                    .graphicsLayer { alpha = 0.48f }
-                            )
+                // Background tiles get an explicit square size. Parent height must
+                // never compress the last row into shorter, uneven covers.
+                Column(Modifier.fillMaxWidth().requiredHeight(coverSize * 2)) {
+                    repeat(2) { row ->
+                        Row(Modifier.fillMaxWidth().height(coverSize)) {
+                            repeat(3) { col ->
+                                val track = heroTracks[(row * 3 + col) % heroTracks.size]
+                                Box(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+                                    ArtworkImage(
+                                        artworkUri = track.albumArtUri(),
+                                        shape = RectangleShape,
+                                        decodeSizePx = 384,
+                                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                                            alpha = 0.48f
+                                            // The decorative crop also hides embedded
+                                            // letterbox borders in cached video artwork.
+                                            scaleX = 1.4f
+                                            scaleY = 1.4f
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -144,36 +158,41 @@ internal fun LibraryHeader(
             listOf(PrimaryBackground.copy(alpha = 0.5f), AppBackgroundGreen.copy(alpha = 0.65f), Color.Transparent)
         )))
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 4.dp)
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Your Library", style = MaterialTheme.typography.headlineLarge, color = PrimaryText)
-                    Spacer(Modifier.height(8.dp))
+                    Text("Your Library", style = MaterialTheme.typography.headlineLarge.copy(
+                        fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = (-1).sp
+                    ), color = PrimaryText)
+                    Spacer(Modifier.height(9.dp))
                     Text("${tracks.size} songs · $playlistCount playlists",
                         style = MaterialTheme.typography.bodySmall, color = SecondaryText)
                 }
+                Spacer(Modifier.width(12.dp))
                 IconButton(
                     onClick = onPlay,
                     enabled = canPlay,
-                    modifier = Modifier.size(48.dp).clip(CircleShape)
+                    modifier = Modifier.size(40.dp).clip(CircleShape)
                         .background(if (canPlay) AccentGreen else SurfaceDark)
                 ) {
                     Icon(Icons.Filled.PlayArrow, "Play library",
-                        tint = if (canPlay) Color.Black else SecondaryText, modifier = Modifier.size(28.dp))
+                        tint = if (canPlay) Color.Black else SecondaryText, modifier = Modifier.size(24.dp))
                 }
-                IconButton(onClick = onShuffle, enabled = canPlay, modifier = Modifier.size(48.dp)) {
+                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = onShuffle, enabled = canPlay, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Filled.Shuffle, "Shuffle library",
                         tint = if (shuffleEnabled && canPlay) AccentGreen else SecondaryText,
                         modifier = Modifier.size(22.dp))
                 }
             }
+            Spacer(Modifier.height(30.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 LibraryViewTabs(playlistView, onViewChange, Modifier.weight(1f))
                 Spacer(Modifier.width(12.dp))
-                LibrarySortMenu(sortMode, onSortChange, Modifier.weight(1f))
+                LibrarySortMenu(sortMode, onSortChange, Modifier.width(124.dp))
             }
+            Spacer(Modifier.height(22.dp))
             LibrarySearch(query, onQueryChange)
         }
     }
@@ -181,7 +200,7 @@ internal fun LibraryHeader(
 
 @Composable
 private fun LibraryViewTabs(playlistView: Boolean, onViewChange: (Boolean) -> Unit, modifier: Modifier) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
         listOf("Songs" to false, "Playlists" to true).forEach { (label, isPlaylist) ->
             val active = playlistView == isPlaylist
             Column(
@@ -190,7 +209,7 @@ private fun LibraryViewTabs(playlistView: Boolean, onViewChange: (Boolean) -> Un
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(Modifier.height(45.dp), contentAlignment = Alignment.Center) {
-                    Text(label, style = MaterialTheme.typography.labelLarge,
+                    Text(label, style = MaterialTheme.typography.labelLarge, fontSize = 13.sp,
                         fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
                         color = if (active) PrimaryText else SecondaryText)
                 }
@@ -225,19 +244,23 @@ private fun LibrarySortMenu(mode: TrackSortMode, onChange: (TrackSortMode) -> Un
 @Composable
 private fun LibrarySearch(query: String, onChange: (String) -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(10.dp)
     BasicTextField(
         value = query,
         onValueChange = onChange,
-        modifier = Modifier.fillMaxWidth().height(48.dp).clip(shape)
-            .background(SurfaceDark.copy(alpha = 0.86f))
-            .border(1.dp, if (focused) AccentGreen else Color.White.copy(alpha = 0.07f), shape)
+        modifier = Modifier.fillMaxWidth().height(46.dp)
+            .drawWithCache {
+                onDrawBehind {
+                    drawLine(if (focused) AccentGreen else Color.White.copy(alpha = 0.15f),
+                        Offset(0f, size.height - 0.5.dp.toPx()),
+                        Offset(size.width, size.height - 0.5.dp.toPx()), strokeWidth = 1.dp.toPx())
+                }
+            }
             .onFocusChanged { focused = it.isFocused },
         textStyle = MaterialTheme.typography.bodyMedium.copy(color = PrimaryText),
         cursorBrush = SolidColor(AccentGreen),
         singleLine = true,
         decorationBox = { inner ->
-            Row(Modifier.fillMaxSize().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Search, null, tint = SecondaryText, modifier = Modifier.size(20.dp))
                 Box(Modifier.weight(1f).padding(horizontal = 10.dp), contentAlignment = Alignment.CenterStart) {
                     if (query.isEmpty()) Text("Search your library", style = MaterialTheme.typography.bodyMedium,

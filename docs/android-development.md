@@ -77,6 +77,31 @@ Java/SDK/build-tools/gate alignment. It ignores
 external links, generated/vendor documentation and secret/local files. This
 detects surface drift, not semantic truth, migration correctness or Desktop parity.
 
+## Fast phone iteration over an installed release
+
+An ordinary debug key cannot update a release-signed installation. For local
+testing with the existing library, open [phone-dev.command](../scripts/phone-dev.command)
+in Terminal. It prompts once for the release keystore/passwords, holds passwords
+only in that Terminal session, and uses the same application ID/signature for
+data-preserving `adb install -r`. Never uninstall to resolve signing errors.
+The keystore defaults to `~/Documents/Luno-Mobile-Signing/luno-release.jks`;
+`LUNO_DEV_KEYSTORE` and `LUNO_DEV_KEY_ALIAS` can override it. SDK lookup uses
+`ANDROID_HOME` or macOS's `~/Library/Android/sdk`; Java must be configured.
+
+After each successful local `:app:assembleDebug`, request an install:
+
+```bash
+mkdir -p app/build/phone-dev
+date +%s > app/build/phone-dev/request
+```
+
+The installer signs/verifies the completed APK and launches it on the connected
+phone. Status is in `app/build/phone-dev/status`. Debug builds display a `-dev`
+version suffix, remain debuggable and are never release artifacts. Closing the
+Terminal session discards the passwords. Gradle builds incrementally; use the
+canonical gate before the final checkpoint. No GitHub release is needed to
+iterate on the phone.
+
 ## CI and platform coverage
 
 [Android verification](../.github/workflows/android-verify.yml) runs the canonical

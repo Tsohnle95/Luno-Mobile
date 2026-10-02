@@ -4,7 +4,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,7 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,7 +42,6 @@ import androidx.compose.ui.unit.dp
 import com.luno.mobile.data.db.entity.Playlist
 import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.data.db.entity.SystemPlaylists
-import com.luno.mobile.ui.theme.AppBackgroundGreen
 import com.luno.mobile.ui.theme.AccentGreen
 import com.luno.mobile.ui.theme.Dimens
 import com.luno.mobile.ui.theme.PrimaryText
@@ -83,9 +80,6 @@ fun PlaylistCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .then(if (favorites) Modifier.background(Brush.horizontalGradient(
-                    listOf(AppBackgroundGreen, AppBackgroundGreen.copy(alpha = 0.4f))
-                )).border(1.dp, AccentGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp)) else Modifier)
                 .then(
                     if (onLongClick != null) {
                         Modifier.combinedClickable(
@@ -102,7 +96,7 @@ fun PlaylistCard(
                         )
                     }
                 )
-                .padding(horizontal = if (favorites) 12.dp else 0.dp, vertical = 12.dp),
+                .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (selected != null) {
@@ -120,9 +114,9 @@ fun PlaylistCard(
             }
 
             if (favorites) {
-                Box(Modifier.size(60.dp).clip(RoundedCornerShape(8.dp))
+                Box(Modifier.size(88.dp).clip(RoundedCornerShape(8.dp))
                     .background(AccentGreen.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Favorite, null, tint = AccentGreen, modifier = Modifier.size(30.dp))
+                    Icon(Icons.Filled.Favorite, null, tint = AccentGreen, modifier = Modifier.size(40.dp))
                 }
             } else {
                 ArtworkCollage(
@@ -142,7 +136,7 @@ fun PlaylistCard(
             ) {
                 Text(
                     text = playlist.name,
-                    style = if (favorites) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = PrimaryText,
                     maxLines = 2,
@@ -231,7 +225,7 @@ fun PlaylistCard(
                 }
             }
         }
-        if (!favorites) HorizontalDivider(color = Color.White.copy(alpha = 0.07f), thickness = 0.5.dp)
+        HorizontalDivider(color = Color.White.copy(alpha = 0.07f), thickness = 0.5.dp)
 
     }
 }

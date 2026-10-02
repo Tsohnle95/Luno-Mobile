@@ -66,15 +66,20 @@ unexpectedly delete source audio. Download destination publication is owned by
 uses the selected record-shelf direction from [the design gallery](../design/README.md).
 [LibraryHeader](../app/src/main/java/com/luno/mobile/ui/library/LibraryPresentation.kt)
 adds a full-width, faded wall of up to six distinct cached covers above the green
-body gradient. The decoration is stable across search/view/sort changes, excludes
+body gradient. Library owns its header; the shell omits the Luno wordmark here.
+The six covers use equal square tiles independently of the foreground height.
+The decoration is stable across search/view/sort changes, excludes
 accessibility semantics and has no metadata or playback ownership. Cover images
 remain upright. The initial view is Playlists; direct Songs/Playlists tabs retain
 saveable view state and clear selection only when the view actually changes.
-Search and sort use the existing projections and shared `TrackSortMode` modes.
+Search has the underline treatment from concept 05; search and sort use the
+existing projections and shared `TrackSortMode` modes. Header counts include
+the virtual Favorites playlist, consistently with the list.
 
 [PlaylistCard](../app/src/main/java/com/luno/mobile/ui/components/PlaylistCard.kt)
 renders larger flat artwork and actual song-count/total-duration metadata. The
-virtual Favorites row has a green heart tile and no destructive actions. Existing
+virtual Favorites row has a green heart tile, the same geometry/type/divider as
+other rows, and no destructive actions. Existing
 selection, sync/cancellation, URL editing, clear/delete and export callbacks stay
 owned by the screen/repositories. Header playback uses the sorted, filtered song
 context and is disabled when that context is empty.

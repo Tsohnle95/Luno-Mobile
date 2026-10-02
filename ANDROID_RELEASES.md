@@ -24,6 +24,12 @@ The underlying direct Gradle workflow remains:
 
 The root helper builds and installs/launches when `adb` sees a connected device; without a device it builds the APK only. The debug variant does not use the release keystore or release secrets.
 
+To iterate on a phone that already has a release installed, use the
+[local phone development installer](docs/android-development.md#fast-phone-iteration-over-an-installed-release).
+It re-signs the debug APK with your existing release key so `adb install -r`
+preserves the library. Passwords stay in the private Terminal session. These
+debug artifacts are local testing builds and must not be published as releases.
+
 ## Create The Signing Key
 
 Generate the key once and keep the keystore and passwords backed up securely. Losing this key prevents future APKs from updating an installed app.

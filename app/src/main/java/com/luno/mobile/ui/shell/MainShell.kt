@@ -418,15 +418,7 @@ fun MainShell(
                         Icon(
                             imageVector = ImageVector.vectorResource(id = item.icon),
                             contentDescription = item.label,
-                            // Search renders larger because its glyph is
-                            // optically smaller than the other tab icons.
-                            modifier = Modifier.size(
-                                if (item.route == Routes.SEARCH) {
-                                    Dimens.iconSizeMedium
-                                } else {
-                                    Dimens.bottomNavIconSize
-                                }
-                            )
+                            modifier = Modifier.size(25.dp)
                         )
                     },
                     label = {
@@ -706,11 +698,11 @@ fun MainShell(
                     if (!showAppUpdates) {
                         AppUpdateBanner(app.appUpdateManager, onOpen = { showAppUpdates = true })
                     }
-                    // Home uses its compact greeting/settings row. Playlist
-                    // detail uses a full-width artwork header with its own
-                    // overlaid back control.
+                    // Home owns its greeting; Library and playlist detail own
+                    // full-width artwork headers rather than a second app title.
                     if (currentRoute != Routes.FULL_PLAYER &&
                         currentRoute != Routes.HOME &&
+                        currentRoute != Routes.LIBRARY &&
                         currentRoute != Routes.PLAYLIST_DETAIL
                     ) {
                         AppHeader(onClick = { scope.launch { drawerState.open() } })

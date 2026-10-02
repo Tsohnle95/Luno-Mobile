@@ -246,7 +246,7 @@ fun LibraryScreen(
         item {
             LibraryHeader(
                 tracks = allTracks,
-                playlistCount = playlistsWithTracks.size,
+                playlistCount = playlistsWithTracks.size + 1,
                 query = query,
                 onQueryChange = { query = it },
                 playlistView = playlistView,

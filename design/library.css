@@ -1903,14 +1903,14 @@ button svg {
 }
 
 /* Selected direction: 10's shelf/body gradient with 06's faded artwork bleed. */
-.shelf-hero {
+.selected-preview .shelf-hero {
   position: relative;
   isolation: isolate;
   margin: -24px -24px 0;
   padding: 24px 24px 0;
   overflow: hidden;
 }
-.shelf-cover-wall {
+.selected-preview .shelf-cover-wall {
   position: absolute;
   inset: 0;
   z-index: -2;
@@ -1921,13 +1921,15 @@ button svg {
   opacity: .48;
   mask-image: linear-gradient(to bottom, #000 0%, #000 45%, transparent 100%);
 }
-.shelf-cover-wall .art {
+.selected-preview .shelf-cover-wall .art {
   width: 100%;
   height: auto;
   aspect-ratio: 1;
   border-radius: 0;
+  transform: scale(1.4);
 }
-.shelf-hero::after {
+.selected-preview .shelf-cover-wall > span { display:block; overflow:hidden; aspect-ratio:1; }
+.selected-preview .shelf-hero::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -1935,11 +1937,19 @@ button svg {
   pointer-events: none;
   background: linear-gradient(to bottom, #10101080, #102b1ca6 50%, transparent);
 }
-.record-sleeves .playlist-main .art,
-.record-sleeves .playlist-card:nth-child(even) .art,
-.record-sleeves.song-results .art {
+.selected-preview .record-sleeves .playlist-main .art,
+.selected-preview .record-sleeves .playlist-card:nth-child(even) .art,
+.selected-preview .record-sleeves.song-results .art {
   transform: none;
 }
 @media(max-width:350px) {
-  .shelf-hero { margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; }
+  .selected-preview .shelf-hero { margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; }
 }
+
+/* The app target is separate; concepts 01–10 retain their original designs. */
+.selected-preview .search-line { margin-bottom: 24px; }
+.selected-preview .record-sleeves .liked-card { border-bottom:1px solid #ffffff10; padding:0 0 17px; margin-bottom:18px; }
+.selected-preview .record-sleeves .liked-card .playlist-main { background:transparent; padding:0; border:0; border-radius:0; gap:19px; min-height:94px; }
+.selected-preview .record-sleeves .liked-card .art { width:90px; height:90px; border-radius:7px; }
+.selected-preview .record-sleeves .liked-card .playlist-copy strong { font-size:20px; }
+.selected-preview.phone { width: min(100%, 360px); }

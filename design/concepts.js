@@ -44,9 +44,9 @@ window.LUNO_CONCEPTS = [
     background: 'A diagonal green wash adds character behind generous, uncomplicated rows.',
     search: 'Search and Play share one rounded control surface, with a separate Shuffle action.',
     controls: 'Songs and Playlists use large text tabs. Sorting is aligned with the result count.' },
-  { id: '10', name: 'Record shelf', type: 'Selected · Faded artwork hero', className: 'shelf', defaultView: 'playlists',
-    summary: 'The selected record-shelf layout, with upright artwork and the faded hero from concept 06.',
-    background: 'The artwork hero fades into the original deep green body gradient. Playlist artwork stays flat and upright.',
+  { id: '10', name: 'Record shelf', type: 'Playlist first · Wide artwork rows', className: 'shelf', defaultView: 'playlists',
+    summary: 'Wide playlist sleeves make the collection feel tactile without changing Luno’s palette.',
+    background: 'Faint shelf lines and a deep green light add texture without competing with covers.',
     search: 'A compact search strip sits below a clear title and view switch.',
     controls: 'Library playback is one small header cluster. Individual sleeves remain easy to browse.' }
 ];

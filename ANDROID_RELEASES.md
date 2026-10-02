@@ -75,7 +75,7 @@ git push origin v0.1.0
 6. The workflow verifies that the tag matches `versionName` and verifies the APK signature.
 7. A GitHub Release is created automatically with `Luno-Mobile-v0.1.0.apk` attached.
 
-The Android app's **Home profile → Settings → App → App updates** entry shows
+The Android app's **Home profile → Settings → App → Check for updates** entry shows
 the installed version and checks the latest stable GitHub release. **Download &
 install** requests Android's install permission first when needed. Enable **Allow
 from this source** and return to Luno; the download starts automatically. The

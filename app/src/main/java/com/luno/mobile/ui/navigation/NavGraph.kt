@@ -87,18 +87,6 @@ fun LunoNavHost(
                     onNavigate()
                     navController.navigate(Routes.MADE_FOR_YOU)
                 },
-                onOpenDownloads = {
-                    onNavigate()
-                    navController.navigate(Routes.DOWNLOADS) {
-                        launchSingleTop = true
-                    }
-                },
-                onOpenRecents = {
-                    onNavigate()
-                    navController.navigate(Routes.RECENTS) {
-                        launchSingleTop = true
-                    }
-                },
                 onOpenSettings = onOpenSettings
             )
         }

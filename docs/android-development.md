@@ -109,7 +109,7 @@ currently supplies those assurances; owners document the precise gaps.
   `local.properties` contents for cartography. Retry sandbox/network failures
   with required permission; do not label incomplete resolution a passing gate.
 - Crash: `LunoApp` appends uncaught failures to private `filesDir/crash_log.txt`,
-  visible through Settings → Error log, then invokes the previous handler.
+  then invokes the previous handler. The file has no in-app Settings entry.
   Device `adb logcat` can corroborate; avoid logging API keys or user-private data.
 - Stuck downloads: trace Room job ID/work ID → WorkManager terminal state →
   `reconcileActiveDownloads`; restart/periodic reconciliation is the repair path.

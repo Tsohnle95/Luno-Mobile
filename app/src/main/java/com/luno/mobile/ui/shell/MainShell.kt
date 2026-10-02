@@ -1,6 +1,7 @@
 package com.luno.mobile.ui.shell
 
 import android.Manifest
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
@@ -26,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,7 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -109,7 +109,6 @@ import com.luno.mobile.ui.theme.PrimaryBackground
 import com.luno.mobile.ui.theme.PrimaryText
 import com.luno.mobile.ui.theme.SecondaryText
 import com.luno.mobile.ui.theme.SurfaceDark
-import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -149,14 +148,14 @@ fun MainShell(
     val context = LocalContext.current
     val navController = rememberNavController()
     var showCreateSheet by rememberSaveable { mutableStateOf(false) }
-    // Drawer settings state: clear-history confirm + error log dialog.
+    // Drawer settings state.
     var showClearHistoryConfirm by remember { mutableStateOf(false) }
-    var showErrorLog by remember { mutableStateOf(false) }
     var showLastfmKeyDialog by remember { mutableStateOf(false) }
     var showAppUpdates by rememberSaveable { mutableStateOf(false) }
     var pendingManifestExport by remember { mutableStateOf<LibraryManifest?>(null) }
     var manifestExportBusy by remember { mutableStateOf(false) }
     var expandedSettingsSection by rememberSaveable { mutableStateOf<String?>(null) }
+    var showAbout by rememberSaveable { mutableStateOf(false) }
     val hasActiveItem by musicController.hasActiveItem.collectAsState()
     val currentBackStackState = navController.currentBackStackEntryAsState()
     val currentBackStack by currentBackStackState
@@ -621,29 +620,37 @@ fun MainShell(
                     }
                 ) {
                     DrawerItem(
-                        icon = Icons.Filled.Info,
-                        label = "About",
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            Toast.makeText(context, "Luno v${BuildConfig.VERSION_NAME}", Toast.LENGTH_SHORT).show()
-                        }
-                    )
-                    DrawerItem(
                         icon = Icons.Filled.SystemUpdate,
-                        label = "App updates · ${BuildConfig.VERSION_NAME}",
+                        label = "Check for updates",
                         onClick = {
                             scope.launch { drawerState.close() }
                             showAppUpdates = true
                         }
                     )
-                    DrawerItem(
-                        icon = Icons.Filled.BugReport,
-                        label = "Error log",
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            showErrorLog = true
-                        }
-                    )
+                    SettingsAccordion(
+                        title = "About",
+                        icon = Icons.Filled.Info,
+                        expanded = showAbout,
+                        onToggle = { showAbout = !showAbout }
+                    ) {
+                        Text(
+                            text = "Luno v${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = SecondaryText,
+                            modifier = Modifier.padding(
+                                horizontal = Dimens.paddingLarge,
+                                vertical = Dimens.paddingSmall
+                            )
+                        )
+                        DrawerItem(
+                            icon = Icons.Filled.OpenInNew,
+                            label = "GitHub repository",
+                            onClick = {
+                                context.startActivity(Intent(Intent.ACTION_VIEW,
+                                    Uri.parse("https://github.com/Tsohnle95/Luno-Mobile")))
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -904,39 +911,6 @@ fun MainShell(
                         showLastfmKeyDialog = false
                     },
                     onDismiss = { showLastfmKeyDialog = false }
-                )
-            }
-
-            // Error log (Settings drawer) — shows the last captured crash
-            // stack from crash_log.txt, so a crash can be reported without
-            // logcat (desktop error_log-view parity).
-            if (showErrorLog) {
-                val crashLog = remember {
-                    val file = File(context.filesDir, "crash_log.txt")
-                    if (file.exists()) file.readText() else ""
-                }
-                androidx.compose.material3.AlertDialog(
-                    onDismissRequest = { showErrorLog = false },
-                    containerColor = SurfaceDark,
-                    titleContentColor = PrimaryText,
-                    textContentColor = PrimaryText,
-                    title = { Text("Error log") },
-                    text = {
-                        Text(
-                            text = crashLog.ifBlank { "No crashes logged yet." },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = SecondaryText,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 360.dp)
-                                .verticalScroll(rememberScrollState())
-                        )
-                    },
-                    confirmButton = {
-                        androidx.compose.material3.TextButton(onClick = { showErrorLog = false }) {
-                            Text("Close", color = AccentGreen)
-                        }
-                    }
                 )
             }
 

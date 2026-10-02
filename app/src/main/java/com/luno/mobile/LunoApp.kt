@@ -201,9 +201,8 @@ class LunoApp : Application(), Configuration.Provider {
     }
 
     /**
-     * Captures any uncaught crash to `filesDir/crash_log.txt` (readable from
-     * the Settings drawer's "Error log" item) before the process dies, so a
-     * reproducible crash can be reported without logcat.  The previous
+     * Captures any uncaught crash to private `filesDir/crash_log.txt` before
+     * the process dies for developer diagnostics. The previous
      * default handler always runs afterwards.
      */
     private fun installCrashCapture() {

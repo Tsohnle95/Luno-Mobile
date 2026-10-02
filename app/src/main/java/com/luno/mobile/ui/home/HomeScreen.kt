@@ -30,9 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -161,8 +159,6 @@ fun HomeScreen(
     onPlay: (List<MediaTrack>, Int, Boolean) -> Unit = { _, _, _ -> },
     onOpenPlaylist: (Long) -> Unit = {},
     onOpenMadeForYou: () -> Unit = {},
-    onOpenDownloads: () -> Unit = {},
-    onOpenRecents: () -> Unit = {},
     onOpenSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -475,8 +471,6 @@ fun HomeScreen(
         item(key = "greeting", contentType = "hero") {
             HomeHero(
                 greeting = greeting,
-                onOpenDownloads = onOpenDownloads,
-                onOpenRecents = onOpenRecents,
                 onOpenSettings = onOpenSettings
             )
         }
@@ -952,8 +946,6 @@ private fun HomePlaylistCard(
 @Composable
 private fun HomeHero(
     greeting: String,
-    onOpenDownloads: () -> Unit,
-    onOpenRecents: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     Row(
@@ -969,22 +961,6 @@ private fun HomeHero(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f)
         )
-        IconButton(onClick = onOpenDownloads, modifier = Modifier.size(40.dp)) {
-            Icon(
-                imageVector = Icons.Filled.NotificationsNone,
-                contentDescription = "Downloads",
-                tint = PrimaryText,
-                modifier = Modifier.size(Dimens.iconSize)
-            )
-        }
-        IconButton(onClick = onOpenRecents, modifier = Modifier.size(40.dp)) {
-            Icon(
-                imageVector = Icons.Filled.History,
-                contentDescription = "Recently played",
-                tint = PrimaryText,
-                modifier = Modifier.size(Dimens.iconSize)
-            )
-        }
         IconButton(onClick = onOpenSettings, modifier = Modifier.size(40.dp)) {
             Icon(
                 imageVector = Icons.Filled.AccountCircle,

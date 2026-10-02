@@ -28,7 +28,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -50,6 +53,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,6 +64,8 @@ import com.luno.mobile.LunoApp
 import com.luno.mobile.data.db.dao.PlaylistWithTracks
 import com.luno.mobile.data.db.entity.DownloadJob
 import com.luno.mobile.data.db.entity.DownloadState
+import com.luno.mobile.data.db.entity.Playlist
+import com.luno.mobile.data.db.entity.SystemPlaylists
 import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.playback.MediaTrack
 import com.luno.mobile.playback.MusicController
@@ -70,9 +77,11 @@ import com.luno.mobile.ui.components.RecommendationArtworkImage
 import com.luno.mobile.ui.components.TrackActionsSheet
 import com.luno.mobile.ui.theme.AccentGreen
 import com.luno.mobile.ui.theme.Dimens
+import com.luno.mobile.ui.theme.PrimaryBackground
 import com.luno.mobile.ui.theme.PrimaryText
 import com.luno.mobile.ui.theme.SecondaryText
 import com.luno.mobile.ui.theme.SurfaceDark
+import com.luno.mobile.ui.theme.SurfaceElevated
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -152,6 +161,8 @@ fun HomeScreen(
     onPlay: (List<MediaTrack>, Int, Boolean) -> Unit = { _, _, _ -> },
     onOpenPlaylist: (Long) -> Unit = {},
     onOpenMadeForYou: () -> Unit = {},
+    onOpenDownloads: () -> Unit = {},
+    onOpenRecents: () -> Unit = {},
     onOpenSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -333,6 +344,9 @@ fun HomeScreen(
             )
             .take(20)
     }
+    val recentPlaylists = remember(homePlaylists, homeRecentlyPlayed) {
+        recentlyPlayedPlaylists(homePlaylists, homeRecentlyPlayed)
+    }
     val favoriteTracks = remember(homeTracks) {
         homeTracks
             .filter { it.isFavorite }
@@ -341,6 +355,34 @@ fun HomeScreen(
                     .thenBy { it.uri }
             )
             .take(20)
+    }
+    val yourShows = remember(homePlaylists) {
+        homePlaylists
+            .sortedWith(
+                compareByDescending<PlaylistWithTracks> { it.playlist.lastPlayedAt }
+                    .thenByDescending { it.playlist.createdAt }
+                    .thenBy { it.playlist.id }
+            )
+            .take(20)
+    }
+    val quickAccessPlaylists = remember(favoriteTracks, recentPlaylists, yourShows) {
+        buildList {
+            add(
+                PlaylistWithTracks(
+                    playlist = Playlist(
+                        id = SystemPlaylists.FAVORITES_ID,
+                        name = "Favorites"
+                    ),
+                    tracks = favoriteTracks
+                )
+            )
+            addAll(
+                (recentPlaylists + yourShows)
+                    .filterNot { it.playlist.id == SystemPlaylists.FAVORITES_ID }
+                    .distinctBy { it.playlist.id }
+                    .take(5)
+            )
+        }
     }
     val favoriteTracksMedia = remember(favoriteTracks) {
         favoriteTracks.map {
@@ -368,19 +410,6 @@ fun HomeScreen(
             )
         }
     }
-    val popularPlaylists = remember(homePlaylists) {
-        homePlaylists
-            .filter { it.playlist.playCount > 0 }
-            .sortedWith(
-                compareByDescending<PlaylistWithTracks> { it.playlist.playCount }
-                    .thenBy { it.playlist.id }
-            )
-            .take(10)
-    }
-    val recentPlaylists = remember(homePlaylists, homeRecentlyPlayed) {
-        recentlyPlayedPlaylists(homePlaylists, homeRecentlyPlayed)
-    }
-
     var selectionMode by remember { mutableStateOf(false) }
     var selectedKeys by remember { mutableStateOf(setOf<String>()) }
     var actionsTrack by remember { mutableStateOf<Track?>(null) }
@@ -394,7 +423,7 @@ fun HomeScreen(
         madeForYou,
         favoriteTracks,
         popularTracks,
-        popularPlaylists,
+        yourShows,
         recentPlaylists
     ) {
         buildSet {
@@ -403,8 +432,7 @@ fun HomeScreen(
             addAll(madeForYou.map { it.uri })
             addAll(favoriteTracks.map { it.uri })
             addAll(popularTracks.map { it.uri })
-            addAll(popularPlaylists.map { "p${it.playlist.id}" })
-            addAll(recentPlaylists.map { "p${it.playlist.id}" })
+            addAll(yourShows.map { "p${it.playlist.id}" })
         }
     }
     val scope = rememberCoroutineScope()
@@ -425,13 +453,15 @@ fun HomeScreen(
         selectedKeys = emptySet()
     }
 
+    var selectedCategory by rememberSaveable { mutableStateOf("Music") }
+
     // Edge-to-edge column; each section supplies its own horizontal padding
     // so carousels clip visibly at the screen edges.  Vertical rhythm is
     // standardized: 16dp above the greeting, then every section is broken
     // by a 24dp header gap with an 8dp header-to-content gap.
     LazyColumn(
         state = homeListState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().background(PrimaryBackground),
         // The shell overlays the mini-player on Home so its appearance never
         // changes the viewport while this list is being dragged. Keep a
         // permanent end inset so the last carousel remains reachable under
@@ -445,345 +475,398 @@ fun HomeScreen(
         item(key = "greeting", contentType = "hero") {
             HomeHero(
                 greeting = greeting,
+                onOpenDownloads = onOpenDownloads,
+                onOpenRecents = onOpenRecents,
                 onOpenSettings = onOpenSettings
             )
         }
 
-        if (recentPlaylists.isNotEmpty()) {
-            item(key = "recent-playlists", contentType = "recent-playlist-grid") {
-                RecentPlaylistGrid(
-                    playlists = recentPlaylists,
-                    selected = { playlist ->
-                        if (selectionMode) "p${playlist.playlist.id}" in selectedKeys else null
-                    },
-                    onClick = { playlist ->
-                        if (selectionMode) toggleSelection("p${playlist.playlist.id}")
-                        else onOpenPlaylist(playlist.playlist.id)
-                    },
-                    onLongClick = { playlist -> beginSelection("p${playlist.playlist.id}") },
-                    modifier = Modifier.padding(top = Dimens.paddingSmall)
-                )
-            }
-        }
-
-        if (selectionMode) {
-            item(key = "selection-toolbar", contentType = "toolbar") {
-                BulkSelectionToolbar(
-                    selectedTracks = selectedTracks,
-                    selectedPlaylists = selectedPlaylists,
-                    allSelected = selectableKeys.isNotEmpty() && selectableKeys.all { it in selectedKeys },
-                    onSelectAll = { selectAll ->
-                        if (selectAll) {
-                            selectionMode = true
-                            selectedKeys = selectableKeys
-                        } else {
-                            exitSelection()
-                        }
-                    },
-                    onDismiss = ::exitSelection,
-                    onAddToPlaylist = { playlist, trackUris ->
-                        scope.launch {
-                            app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
-                            Toast.makeText(context, "Added to ${playlist.name}", Toast.LENGTH_SHORT).show()
-                        }
-                        exitSelection()
-                    },
-                    onCreatePlaylist = { name, description, trackUris ->
-                        scope.launch {
-                            app.playlistRepository.createPlaylist(name, description).onSuccess { playlist ->
-                                app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
-                                Toast.makeText(context, "Created ${playlist.name}", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                        exitSelection()
-                    },
-                    onRemoveTracks = { uris ->
-                        scope.launch { uris.forEach { app.libraryRepository.deleteTrack(it) } }
-                        exitSelection()
-                    },
-                    onDeletePlaylists = { ids ->
-                        scope.launch { ids.forEach { app.playlistRepository.deletePlaylist(it) } }
-                        exitSelection()
-                    },
-                    modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
-                )
-            }
-        }
-
-        // Made for you — a random mix from the entire catalogue.
-        item(key = "made-header", contentType = "section-header") {
-            SectionHeader(
-                title = "Made for you",
-                supportingText = "A fresh mix from your library",
-                onClick = if (homeTracks.isEmpty()) null else {
-                    {
-                        app.setMadeForYouTracks(madeForYou)
-                        onOpenMadeForYou()
-                    }
-                }
+        item(key = "home-categories", contentType = "category-filters") {
+            HomeCategoryFilters(
+                selectedCategory = selectedCategory,
+                onCategorySelected = { selectedCategory = it },
+                modifier = Modifier.padding(top = Dimens.paddingSmall)
             )
         }
-        if (homeTracks.isEmpty()) {
-            item(key = "made-empty", contentType = "empty-state") {
+
+        if (selectedCategory != "Music") {
+            item(key = "unsupported-category", contentType = "empty-state") {
                 EmptyStateCard(
-                    title = "Nothing here yet",
-                    subtitle = "Songs from your library will appear here",
-                    modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                    title = if (selectedCategory == "Podcasts & Shows") {
+                        "No podcasts or shows in your library yet"
+                    } else {
+                        "No audiobooks in your library yet"
+                    },
+                    subtitle = "Luno currently plays music from your local library.",
+                    modifier = Modifier.padding(
+                        horizontal = Dimens.paddingLarge,
+                        vertical = Dimens.paddingXLarge
+                    )
                 )
             }
         } else {
-            item(key = "made-carousel", contentType = "track-carousel") {
-                LazyRow(
-                    state = madeForYouListState,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
-                    contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
-                ) {
-                    items(
-                        madeForYou,
-                        key = { it.uri },
-                        contentType = { "track-card" }
-                    ) { track ->
-                        TrackCard(
-                            title = track.title,
-                            artist = track.artist,
-                            artworkUri = track.albumArtUri(),
-                            selected = if (selectionMode) track.uri in selectedKeys else null,
-                            onClick = {
-                                if (selectionMode) toggleSelection(track.uri) else {
-                                    val index = madeForYou.indexOfFirst { it.uri == track.uri }
-                                    onPlay(madeForYouMedia, index.coerceAtLeast(0), false)
-                                }
-                            },
-                            onLongClick = { beginSelection(track.uri) }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Favorites — songs explicitly marked by the user, kept ahead of the
-        // popularity section while retaining the same edge-clipped carousel.
-        item(key = "favorites-header", contentType = "section-header") {
-            SectionHeader(
-                title = "Favorites",
-                supportingText = "Songs you marked as favorites"
-            )
-        }
-        if (favoriteTracks.isNotEmpty()) {
-            item(key = "favorites-carousel", contentType = "track-carousel") {
-                LazyRow(
-                    state = favoritesListState,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
-                    contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
-                ) {
-                    items(
-                        favoriteTracks,
-                        key = { it.uri },
-                        contentType = { "track-card" }
-                    ) { track ->
-                        TrackCard(
-                            title = track.title,
-                            artist = track.artist,
-                            artworkUri = track.albumArtUri(),
-                            selected = if (selectionMode) track.uri in selectedKeys else null,
-                            onClick = {
-                                if (selectionMode) {
-                                    toggleSelection(track.uri)
-                                } else {
-                                    val index = favoriteTracks.indexOfFirst { it.uri == track.uri }
-                                    onPlay(favoriteTracksMedia, index.coerceAtLeast(0), false)
-                                }
-                            },
-                            onLongClick = { beginSelection(track.uri) },
-                            onMenuClick = { actionsTrack = track }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Recently played — swipeable horizontal carousel of the full
-        // persisted history, edge-clipped like "Made for you"
-        item(key = "recently-header", contentType = "section-header") {
-            SectionHeader(title = "Recently played")
-        }
-        if (homeRecentlyPlayed.isEmpty() && !homeHasCurrentTrack) {
-            item(key = "recently-empty", contentType = "empty-state") {
-                EmptyStateCard(
-                    title = "No tracks yet",
-                    subtitle = "Use Download to find music and get started",
-                    modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
-                )
-            }
-        } else {
-            item(key = "recently-carousel", contentType = "track-carousel") {
-                // distinctBy: a track may legitimately appear twice in
-                // history (non-consecutive plays); duplicate keys would
-                // make the LazyRow jump or throw.
-                val history = homeRecentlyPlayed
-                    .distinctBy { it.uri }
-                    .take(20)
-                    .map { it.copy(playbackSource = PlaybackSource("Home", "Recently played")) }
-                LazyRow(
-                    state = recentlyPlayedListState,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
-                    contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
-                ) {
-                    items(
-                        history,
-                        key = { it.uri },
-                        contentType = { "track-card" }
-                    ) { track ->
-                        TrackCard(
-                            title = track.title,
-                            artist = track.artist,
-                            artworkUri = track.artworkUri,
-                            // Next/prev walk the recent history (desktop
-                            // "Recently Played" context).
-                            selected = if (selectionMode) track.uri in selectedKeys else null,
-                            onClick = {
-                                if (selectionMode) toggleSelection(track.uri) else {
-                                    val index = history.indexOfFirst { it.uri == track.uri }
-                                    onPlay(history, index.coerceAtLeast(0), false)
-                                }
-                            },
-                            onLongClick = { beginSelection(track.uri) }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Most popular — local play counts are persisted in Room. Songs and
-        // playlists are kept in separate edge-clipped carousels.
-        item(key = "popular-header", contentType = "section-header") {
-            SectionHeader(
-                title = "Most popular",
-                supportingText = "Based on your local play counts"
-            )
-        }
-        if (popularTracks.isEmpty() && popularPlaylists.isEmpty()) {
-            item(key = "popular-empty", contentType = "empty-state") {
-                EmptyStateCard(
-                    title = "Nothing popular yet",
-                    subtitle = "Play songs to build your local favorites",
-                    modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
-                )
-            }
-        }
-        if (popularTracks.isNotEmpty()) {
-            item(key = "popular-songs-header", contentType = "section-header") {
-                SectionHeader(title = "Popular songs", topPadding = 0.dp)
-            }
-            item(key = "popular-songs-carousel", contentType = "track-carousel") {
-                LazyRow(
-                    state = popularTracksListState,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
-                    contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
-                ) {
-                    items(
-                        popularTracks,
-                        key = { it.uri },
-                        contentType = { "track-card" }
-                    ) { track ->
-                        TrackCard(
-                            title = track.title,
-                            artist = track.artist,
-                            artworkUri = track.albumArtUri(),
-                            selected = if (selectionMode) track.uri in selectedKeys else null,
-                            onClick = {
-                                if (selectionMode) toggleSelection(track.uri) else {
-                                    val index = popularTracks.indexOfFirst { it.uri == track.uri }
-                                    onPlay(popularTracksMedia, index.coerceAtLeast(0), false)
-                                }
-                            },
-                            onLongClick = { beginSelection(track.uri) }
-                        )
-                    }
-                }
-            }
-        }
-        if (popularPlaylists.isNotEmpty()) {
-            item(key = "popular-playlists-header", contentType = "section-header") {
-                SectionHeader(title = "Popular playlists", topPadding = 0.dp)
-            }
-            item(key = "popular-playlists-carousel", contentType = "playlist-carousel") {
-                LazyRow(
-                    state = popularPlaylistsListState,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
-                    contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
-                ) {
-                    items(
-                        popularPlaylists,
-                        key = { it.playlist.id },
-                        contentType = { "playlist-card" }
-                    ) { playlistWithTracks ->
-                        HomePlaylistCard(
-                            name = playlistWithTracks.playlist.name,
-                            tracks = playlistWithTracks.tracks,
-                            subtitle = "${playlistWithTracks.playlist.playCount} plays",
-                            selected = if (selectionMode) {
-                                "p${playlistWithTracks.playlist.id}" in selectedKeys
-                            } else {
+            if (quickAccessPlaylists.isNotEmpty()) {
+                item(key = "recent-playlists", contentType = "recent-playlist-grid") {
+                    RecentPlaylistGrid(
+                        playlists = quickAccessPlaylists,
+                        selected = { playlist ->
+                            if (!selectionMode) {
                                 null
-                            },
-                            onClick = {
-                                val key = "p${playlistWithTracks.playlist.id}"
-                                if (selectionMode) toggleSelection(key)
-                                else onOpenPlaylist(playlistWithTracks.playlist.id)
-                            },
-                            onLongClick = {
-                                beginSelection("p${playlistWithTracks.playlist.id}")
+                            } else if (playlist.playlist.id == SystemPlaylists.FAVORITES_ID) {
+                                favoriteTracks.isNotEmpty() && favoriteTracks.all { it.uri in selectedKeys }
+                            } else {
+                                "p${playlist.playlist.id}" in selectedKeys
                             }
-                        )
+                        },
+                        onClick = { playlist ->
+                            if (selectionMode && playlist.playlist.id == SystemPlaylists.FAVORITES_ID) {
+                                val favoriteUris = favoriteTracks.map { it.uri }.toSet()
+                                if (favoriteUris.isNotEmpty()) {
+                                    selectedKeys = if (favoriteUris.all { it in selectedKeys }) {
+                                        selectedKeys - favoriteUris
+                                    } else {
+                                        selectedKeys + favoriteUris
+                                    }
+                                    selectionMode = selectedKeys.isNotEmpty()
+                                }
+                            } else if (selectionMode) {
+                                toggleSelection("p${playlist.playlist.id}")
+                            } else {
+                                onOpenPlaylist(playlist.playlist.id)
+                            }
+                        },
+                        onLongClick = { playlist ->
+                            if (playlist.playlist.id == SystemPlaylists.FAVORITES_ID) {
+                                if (favoriteTracks.isNotEmpty()) {
+                                    selectionMode = true
+                                    selectedKeys = selectedKeys + favoriteTracks.map { it.uri }
+                                }
+                            } else {
+                                beginSelection("p${playlist.playlist.id}")
+                            }
+                        },
+                        modifier = Modifier.padding(top = Dimens.paddingSmall)
+                    )
+                }
+            }
+
+            item(key = "jump-back-in-header", contentType = "section-header") {
+                SectionHeader(title = "Jump Back In")
+            }
+            if (homeRecentlyPlayed.isEmpty() && !homeHasCurrentTrack) {
+                item(key = "jump-back-in-empty", contentType = "empty-state") {
+                    EmptyStateCard(
+                        title = "No tracks yet",
+                        subtitle = "Play music from your library and it will show up here",
+                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                    )
+                }
+            } else {
+                item(key = "jump-back-in-carousel", contentType = "track-carousel") {
+                    val history = homeRecentlyPlayed
+                        .distinctBy { it.uri }
+                        .take(20)
+                        .map { it.copy(playbackSource = PlaybackSource("Home", "Jump Back In")) }
+                    LazyRow(
+                        state = recentlyPlayedListState,
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
+                        contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
+                    ) {
+                        items(
+                            history,
+                            key = { it.uri },
+                            contentType = { "track-card" }
+                        ) { track ->
+                            TrackCard(
+                                title = track.title,
+                                artist = track.artist,
+                                artworkUri = track.artworkUri,
+                                selected = if (selectionMode) track.uri in selectedKeys else null,
+                                onClick = {
+                                    if (selectionMode) toggleSelection(track.uri) else {
+                                        val index = history.indexOfFirst { it.uri == track.uri }
+                                        onPlay(history, index.coerceAtLeast(0), false)
+                                    }
+                                },
+                                onLongClick = { beginSelection(track.uri) }
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // Recently downloaded is the final Home category: completed downloads
-        // in completion order, capped at the latest 50 songs.
-        item(key = "downloaded-header", contentType = "section-header") {
-            SectionHeader(
-                title = "Recently downloaded",
-                supportingText = "Your latest 50 downloads"
-            )
-        }
-        if (recentlyDownloaded.isEmpty()) {
-            item(key = "downloaded-empty", contentType = "empty-state") {
-                EmptyStateCard(
-                    title = "No downloads yet",
-                    subtitle = "Downloaded songs will appear here",
-                    modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+            item(key = "your-shows-header", contentType = "section-header") {
+                SectionHeader(title = "Your Shows")
+            }
+            if (yourShows.isEmpty()) {
+                item(key = "your-shows-empty", contentType = "empty-state") {
+                    EmptyStateCard(
+                        title = "No playlists yet",
+                        subtitle = "Your playlists will appear here",
+                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                    )
+                }
+            } else {
+                item(key = "your-shows-carousel", contentType = "playlist-carousel") {
+                    LazyRow(
+                        state = popularPlaylistsListState,
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
+                        contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
+                    ) {
+                        items(
+                            yourShows,
+                            key = { it.playlist.id },
+                            contentType = { "playlist-card" }
+                        ) { playlist ->
+                            HomePlaylistCard(
+                                name = playlist.playlist.name,
+                                tracks = playlist.tracks,
+                                subtitle = "${playlist.tracks.size} songs",
+                                selected = if (selectionMode) {
+                                    "p${playlist.playlist.id}" in selectedKeys
+                                } else {
+                                    null
+                                },
+                                onClick = {
+                                    val key = "p${playlist.playlist.id}"
+                                    if (selectionMode) toggleSelection(key)
+                                    else onOpenPlaylist(playlist.playlist.id)
+                                },
+                                onLongClick = { beginSelection("p${playlist.playlist.id}") }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (selectionMode) {
+                item(key = "selection-toolbar", contentType = "toolbar") {
+                    BulkSelectionToolbar(
+                        selectedTracks = selectedTracks,
+                        selectedPlaylists = selectedPlaylists,
+                        allSelected = selectableKeys.isNotEmpty() && selectableKeys.all { it in selectedKeys },
+                        onSelectAll = { selectAll ->
+                            if (selectAll) {
+                                selectionMode = true
+                                selectedKeys = selectableKeys
+                            } else {
+                                exitSelection()
+                            }
+                        },
+                        onDismiss = ::exitSelection,
+                        onAddToPlaylist = { playlist, trackUris ->
+                            scope.launch {
+                                app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
+                                Toast.makeText(context, "Added to ${playlist.name}", Toast.LENGTH_SHORT).show()
+                            }
+                            exitSelection()
+                        },
+                        onCreatePlaylist = { name, description, trackUris ->
+                            scope.launch {
+                                app.playlistRepository.createPlaylist(name, description).onSuccess { playlist ->
+                                    app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
+                                    Toast.makeText(context, "Created ${playlist.name}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            exitSelection()
+                        },
+                        onRemoveTracks = { uris ->
+                            scope.launch { uris.forEach { app.libraryRepository.deleteTrack(it) } }
+                            exitSelection()
+                        },
+                        onDeletePlaylists = { ids ->
+                            scope.launch { ids.forEach { app.playlistRepository.deletePlaylist(it) } }
+                            exitSelection()
+                        },
+                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                    )
+                }
+            }
+
+            // Made for you — a random mix from the entire catalogue.
+            item(key = "made-header", contentType = "section-header") {
+                SectionHeader(
+                    title = "Made for you",
+                    supportingText = "A fresh mix from your library",
+                    onClick = if (homeTracks.isEmpty()) null else {
+                        {
+                            app.setMadeForYouTracks(madeForYou)
+                            onOpenMadeForYou()
+                        }
+                    }
                 )
             }
-        } else {
-            item(key = "downloaded-carousel", contentType = "track-carousel") {
-                LazyRow(
-                    state = recentlyDownloadedListState,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
-                    contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
-                ) {
-                    items(
-                        recentlyDownloaded,
-                        key = { it.uri },
-                        contentType = { "track-card" }
-                    ) { track ->
-                        TrackCard(
-                            title = track.title,
-                            artist = track.artist,
-                            artworkUri = track.albumArtUri(),
-                            selected = if (selectionMode) track.uri in selectedKeys else null,
-                            onClick = {
-                                if (selectionMode) {
-                                    toggleSelection(track.uri)
-                                } else {
-                                    val index = recentlyDownloaded.indexOfFirst { it.uri == track.uri }
-                                    onPlay(recentlyDownloadedMedia, index.coerceAtLeast(0), false)
-                                }
-                            },
-                            onLongClick = { beginSelection(track.uri) }
-                        )
+            if (homeTracks.isEmpty()) {
+                item(key = "made-empty", contentType = "empty-state") {
+                    EmptyStateCard(
+                        title = "Nothing here yet",
+                        subtitle = "Songs from your library will appear here",
+                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                    )
+                }
+            } else {
+                item(key = "made-carousel", contentType = "track-carousel") {
+                    LazyRow(
+                        state = madeForYouListState,
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
+                        contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
+                    ) {
+                        items(
+                            madeForYou,
+                            key = { it.uri },
+                            contentType = { "track-card" }
+                        ) { track ->
+                            TrackCard(
+                                title = track.title,
+                                artist = track.artist,
+                                artworkUri = track.albumArtUri(),
+                                selected = if (selectionMode) track.uri in selectedKeys else null,
+                                onClick = {
+                                    if (selectionMode) toggleSelection(track.uri) else {
+                                        val index = madeForYou.indexOfFirst { it.uri == track.uri }
+                                        onPlay(madeForYouMedia, index.coerceAtLeast(0), false)
+                                    }
+                                },
+                                onLongClick = { beginSelection(track.uri) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Favorites — songs explicitly marked by the user, kept ahead of the
+            // popularity section while retaining the same edge-clipped carousel.
+            item(key = "favorites-header", contentType = "section-header") {
+                SectionHeader(
+                    title = "Favorites",
+                    supportingText = "Songs you marked as favorites"
+                )
+            }
+            if (favoriteTracks.isNotEmpty()) {
+                item(key = "favorites-carousel", contentType = "track-carousel") {
+                    LazyRow(
+                        state = favoritesListState,
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
+                        contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
+                    ) {
+                        items(
+                            favoriteTracks,
+                            key = { it.uri },
+                            contentType = { "track-card" }
+                        ) { track ->
+                            TrackCard(
+                                title = track.title,
+                                artist = track.artist,
+                                artworkUri = track.albumArtUri(),
+                                selected = if (selectionMode) track.uri in selectedKeys else null,
+                                onClick = {
+                                    if (selectionMode) {
+                                        toggleSelection(track.uri)
+                                    } else {
+                                        val index = favoriteTracks.indexOfFirst { it.uri == track.uri }
+                                        onPlay(favoriteTracksMedia, index.coerceAtLeast(0), false)
+                                    }
+                                },
+                                onLongClick = { beginSelection(track.uri) },
+                                onMenuClick = { actionsTrack = track }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Most popular — local play counts are persisted in Room.
+            item(key = "popular-header", contentType = "section-header") {
+                SectionHeader(
+                    title = "Most popular",
+                    supportingText = "Based on your local play counts"
+                )
+            }
+            if (popularTracks.isEmpty()) {
+                item(key = "popular-empty", contentType = "empty-state") {
+                    EmptyStateCard(
+                        title = "Nothing popular yet",
+                        subtitle = "Play songs to build your local favorites",
+                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                    )
+                }
+            }
+            if (popularTracks.isNotEmpty()) {
+                item(key = "popular-songs-header", contentType = "section-header") {
+                    SectionHeader(title = "Popular songs", topPadding = 0.dp)
+                }
+                item(key = "popular-songs-carousel", contentType = "track-carousel") {
+                    LazyRow(
+                        state = popularTracksListState,
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
+                        contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
+                    ) {
+                        items(
+                            popularTracks,
+                            key = { it.uri },
+                            contentType = { "track-card" }
+                        ) { track ->
+                            TrackCard(
+                                title = track.title,
+                                artist = track.artist,
+                                artworkUri = track.albumArtUri(),
+                                selected = if (selectionMode) track.uri in selectedKeys else null,
+                                onClick = {
+                                    if (selectionMode) toggleSelection(track.uri) else {
+                                        val index = popularTracks.indexOfFirst { it.uri == track.uri }
+                                        onPlay(popularTracksMedia, index.coerceAtLeast(0), false)
+                                    }
+                                },
+                                onLongClick = { beginSelection(track.uri) }
+                            )
+                        }
+                    }
+                }
+            }
+            // Recently downloaded is the final Home category: completed downloads
+            // in completion order, capped at the latest 50 songs.
+            item(key = "downloaded-header", contentType = "section-header") {
+                SectionHeader(
+                    title = "Recently downloaded",
+                    supportingText = "Your latest 50 downloads"
+                )
+            }
+            if (recentlyDownloaded.isEmpty()) {
+                item(key = "downloaded-empty", contentType = "empty-state") {
+                    EmptyStateCard(
+                        title = "No downloads yet",
+                        subtitle = "Downloaded songs will appear here",
+                        modifier = Modifier.padding(horizontal = Dimens.paddingLarge)
+                    )
+                }
+            } else {
+                item(key = "downloaded-carousel", contentType = "track-carousel") {
+                    LazyRow(
+                        state = recentlyDownloadedListState,
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.paddingMedium),
+                        contentPadding = PaddingValues(horizontal = Dimens.paddingLarge)
+                    ) {
+                        items(
+                            recentlyDownloaded,
+                            key = { it.uri },
+                            contentType = { "track-card" }
+                        ) { track ->
+                            TrackCard(
+                                title = track.title,
+                                artist = track.artist,
+                                artworkUri = track.albumArtUri(),
+                                selected = if (selectionMode) track.uri in selectedKeys else null,
+                                onClick = {
+                                    if (selectionMode) {
+                                        toggleSelection(track.uri)
+                                    } else {
+                                        val index = recentlyDownloaded.indexOfFirst { it.uri == track.uri }
+                                        onPlay(recentlyDownloadedMedia, index.coerceAtLeast(0), false)
+                                    }
+                                },
+                                onLongClick = { beginSelection(track.uri) }
+                            )
+                        }
                     }
                 }
             }
@@ -799,9 +882,8 @@ fun HomeScreen(
 }
 
 /**
- * Home-only playlist card matching the "Made for you" TrackCard layout:
- * square artwork (first track's image — no collage on Home) on top, name
- * below, the popularity count as the subtitle.
+ * Playlist card used in Home's horizontal artwork rows: square artwork from
+ * its first track, with the playlist name and track count below.
  */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
@@ -815,7 +897,7 @@ private fun HomePlaylistCard(
 ) {
     Column(
         modifier = Modifier
-            .width(140.dp)
+            .width(148.dp)
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -829,7 +911,7 @@ private fun HomePlaylistCard(
                 title = tracks.firstOrNull()?.title ?: name,
                 artworkUri = tracks.firstOrNull()?.albumArtUri(),
                 modifier = Modifier
-                    .size(Dimens.albumArtMedium)
+                    .size(148.dp)
                     .clip(RoundedCornerShape(Dimens.cornerLarge)),
                 placeholderIconSize = 40.dp,
                 decodeSizePx = 384
@@ -870,6 +952,8 @@ private fun HomePlaylistCard(
 @Composable
 private fun HomeHero(
     greeting: String,
+    onOpenDownloads: () -> Unit,
+    onOpenRecents: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     Row(
@@ -885,13 +969,62 @@ private fun HomeHero(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f)
         )
-        IconButton(onClick = onOpenSettings) {
+        IconButton(onClick = onOpenDownloads, modifier = Modifier.size(40.dp)) {
+            Icon(
+                imageVector = Icons.Filled.NotificationsNone,
+                contentDescription = "Downloads",
+                tint = PrimaryText,
+                modifier = Modifier.size(Dimens.iconSize)
+            )
+        }
+        IconButton(onClick = onOpenRecents, modifier = Modifier.size(40.dp)) {
+            Icon(
+                imageVector = Icons.Filled.History,
+                contentDescription = "Recently played",
+                tint = PrimaryText,
+                modifier = Modifier.size(Dimens.iconSize)
+            )
+        }
+        IconButton(onClick = onOpenSettings, modifier = Modifier.size(40.dp)) {
             Icon(
                 imageVector = Icons.Filled.Settings,
                 contentDescription = "Settings",
                 tint = PrimaryText,
                 modifier = Modifier.size(Dimens.iconSize)
             )
+        }
+    }
+}
+
+@Composable
+private fun HomeCategoryFilters(
+    selectedCategory: String,
+    onCategorySelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.paddingLarge),
+        horizontalArrangement = Arrangement.spacedBy(Dimens.paddingSmall)
+    ) {
+        listOf("Music", "Podcasts & Shows", "Audiobooks").forEach { category ->
+            val selected = category == selectedCategory
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(if (selected) SurfaceElevated else SurfaceDark)
+                    .clickable { onCategorySelected(category) }
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = category,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = PrimaryText,
+                    maxLines = 1
+                )
+            }
         }
     }
 }
@@ -949,14 +1082,29 @@ private fun RecentPlaylistTile(
             ),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ArtworkCollage(
-            tracks = playlist.tracks,
-            modifier = Modifier.size(56.dp),
-            placeholderIconSize = 14.dp,
-            decodeSizePx = 192
-        )
+        if (playlist.playlist.id == SystemPlaylists.FAVORITES_ID) {
+            Box(
+                modifier = Modifier.size(56.dp).background(
+                    Brush.linearGradient(listOf(Color(0xFF4825C5), Color(0xFFC3D6CF)))
+                ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.Favorite, contentDescription = null, tint = Color.White)
+            }
+        } else {
+            ArtworkCollage(
+                tracks = playlist.tracks,
+                modifier = Modifier.size(56.dp),
+                placeholderIconSize = 14.dp,
+                decodeSizePx = 192
+            )
+        }
         Text(
-            text = playlist.playlist.name,
+            text = if (playlist.playlist.id == SystemPlaylists.FAVORITES_ID) {
+                "Liked Songs"
+            } else {
+                playlist.playlist.name
+            },
             style = MaterialTheme.typography.labelLarge,
             color = PrimaryText,
             maxLines = 2,
@@ -1062,7 +1210,7 @@ fun TrackCard(
 ) {
     Column(
         modifier = Modifier
-            .width(140.dp)
+            .width(148.dp)
             .then(
                 if (onLongClick != null) {
                     Modifier.combinedClickable(
@@ -1086,7 +1234,7 @@ fun TrackCard(
                 title = title,
                 artworkUri = artworkUri,
                 modifier = Modifier
-                    .size(Dimens.albumArtMedium)
+                    .size(148.dp)
                     .clip(RoundedCornerShape(Dimens.cornerLarge)),
                 placeholderIconSize = 40.dp,
                 decodeSizePx = 384

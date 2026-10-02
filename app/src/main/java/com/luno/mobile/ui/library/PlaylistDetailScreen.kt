@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -93,7 +92,6 @@ fun PlaylistDetailScreen(
     playlistId: Long,
     musicController: MusicController,
     onBack: () -> Unit,
-    onExportPlaylist: (Long) -> Unit = {},
     onExportTracks: (List<String>) -> Unit = {},
     virtualName: String? = null,
     virtualDescription: String = "",
@@ -264,12 +262,7 @@ fun PlaylistDetailScreen(
                 name = playlistName,
                 description = playlistDescription,
                 tracks = tracks,
-                onBack = onBack,
-                onExport = if (virtualTracks == null && playlistId > 0L) {
-                    { onExportPlaylist(playlistId) }
-                } else {
-                    null
-                }
+                onBack = onBack
             )
         }
 
@@ -428,8 +421,7 @@ private fun PlaylistArtworkHero(
     name: String,
     description: String,
     tracks: List<Track>,
-    onBack: () -> Unit,
-    onExport: (() -> Unit)?
+    onBack: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -476,22 +468,6 @@ private fun PlaylistArtworkHero(
                     tint = Color.White,
                     modifier = Modifier.size(Dimens.iconSize)
                 )
-            }
-            Spacer(modifier = Modifier.weight(1f))
-            if (onExport != null) {
-                IconButton(
-                    onClick = onExport,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.38f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.UploadFile,
-                        contentDescription = "Export playlist",
-                        tint = Color.White,
-                        modifier = Modifier.size(Dimens.iconSize)
-                    )
-                }
             }
         }
         Column(

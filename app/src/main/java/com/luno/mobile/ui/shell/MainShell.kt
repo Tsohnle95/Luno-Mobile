@@ -109,7 +109,6 @@ import com.luno.mobile.ui.navigation.Routes
 import com.luno.mobile.ui.theme.AccentGreen
 import com.luno.mobile.ui.theme.AppBackgroundGreen
 import com.luno.mobile.ui.theme.Dimens
-import com.luno.mobile.ui.theme.NavBarSurface
 import com.luno.mobile.ui.theme.NavBarUnselected
 import com.luno.mobile.ui.theme.PrimaryBackground
 import com.luno.mobile.ui.theme.PrimaryText
@@ -142,9 +141,8 @@ private data class BottomNavItem(
 
 private val bottomNavItems = listOf(
     BottomNavItem("Home", R.drawable.ic_home, Routes.HOME),
-    BottomNavItem("Download", R.drawable.ic_download, Routes.SEARCH),
-    BottomNavItem("Your Library", R.drawable.ic_library, Routes.LIBRARY),
-    BottomNavItem("Discover", R.drawable.ic_discover, Routes.DISCOVER)
+    BottomNavItem("Search", R.drawable.ic_search, Routes.SEARCH),
+    BottomNavItem("Your Library", R.drawable.ic_library, Routes.LIBRARY)
 )
 
 private sealed interface UpdateDialogState {
@@ -250,6 +248,22 @@ fun MainShell(
     // through this state so its page is not revealed with a second loader.
     var transitionMask by remember { mutableStateOf(false) }
     val app = context.applicationContext as com.luno.mobile.LunoApp
+    val libraryTracks by app.libraryData.tracks.collectAsState()
+    val activeTrack by musicController.currentTrack.collectAsState()
+    val activeLibraryTrack = remember(libraryTracks, activeTrack?.uri) {
+        libraryTracks.firstOrNull { it.uri == activeTrack?.uri }
+    }
+    val miniPlayerIsFavorite = activeLibraryTrack?.isFavorite == true
+    val miniPlayerCanFavorite = activeLibraryTrack != null && activeTrack?.isTransient != true
+
+    fun toggleMiniPlayerFavorite() {
+        val track = activeLibraryTrack ?: return
+        if (activeTrack?.isTransient == true) return
+        scope.launch {
+            app.libraryRepository.setFavorite(track.uri, !track.isFavorite)
+        }
+    }
+
     // One routing boundary keeps Discover's pending and active previews ahead
     // of the physical library queue on every in-app Next control.
     fun skipToNext() = app.recommendationPreviewManager.skipToNext()
@@ -443,7 +457,7 @@ fun MainShell(
     @Composable
     fun BottomNavigationBar() {
         NavigationBar(
-            containerColor = NavBarSurface,
+            containerColor = PrimaryBackground,
             tonalElevation = 0.dp
         ) {
             bottomNavItems.forEach { item ->
@@ -452,12 +466,6 @@ fun MainShell(
                     selected = selected,
                     onClick = {
                         if (item.route == currentRoute) return@NavigationBarItem
-                        if (item.route == Routes.DISCOVER) {
-                            // The request starts as soon as Discover composes. Set
-                            // this before navigation so a fast recomposition cannot
-                            // release the mask before the request reports loading.
-                            discoverLoadingState.value = true
-                        }
                         // Mask FIRST: the black layer is opaque before the new
                         // screen composes, so it never flashes in early.
                         transitionMask = true
@@ -487,8 +495,8 @@ fun MainShell(
                         Icon(
                             imageVector = ImageVector.vectorResource(id = item.icon),
                             contentDescription = item.label,
-                            // Download renders at 28dp because its glyph is
-                            // optically smaller than the other tabs.
+                            // Search renders larger because its glyph is
+                            // optically smaller than the other tab icons.
                             modifier = Modifier.size(
                                 if (item.route == Routes.SEARCH) {
                                     Dimens.iconSizeMedium
@@ -505,38 +513,15 @@ fun MainShell(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = AccentGreen,
-                        selectedTextColor = AccentGreen,
+                        selectedIconColor = PrimaryText,
+                        selectedTextColor = PrimaryText,
                         unselectedIconColor = NavBarUnselected,
                         unselectedTextColor = NavBarUnselected,
-                        indicatorColor = NavBarSurface
+                        indicatorColor = PrimaryBackground
                     )
                 )
             }
 
-            // Create action item (does not navigate)
-            NavigationBarItem(
-                selected = false,
-                onClick = { showCreateSheet = true },
-                icon = {
-                    Icon(
-                        imageVector = ImageVector.vectorResource(id = R.drawable.ic_create),
-                        contentDescription = "Create",
-                        modifier = Modifier.size(Dimens.iconSizeLarge)
-                    )
-                },
-                label = {
-                    Text(
-                        text = "Create",
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    unselectedIconColor = NavBarUnselected,
-                    unselectedTextColor = NavBarUnselected,
-                    indicatorColor = NavBarSurface
-                )
-            )
         }
     }
 
@@ -575,6 +560,14 @@ fun MainShell(
                         }
                     }
                 ) {
+                    DrawerItem(
+                        icon = ImageVector.vectorResource(id = R.drawable.ic_create),
+                        label = "Create playlist",
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            showCreateSheet = true
+                        }
+                    )
                     DrawerItem(
                         icon = Icons.Filled.Folder,
                         label = "Music folder",
@@ -650,6 +643,20 @@ fun MainShell(
                         }
                     }
                 ) {
+                    DrawerItem(
+                        icon = ImageVector.vectorResource(id = R.drawable.ic_discover),
+                        label = "Discover",
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            if (currentRoute != Routes.DISCOVER) {
+                                discoverLoadingState.value = true
+                                transitionMask = true
+                                navController.navigate(Routes.DISCOVER) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        }
+                    )
                     DrawerItem(
                         icon = Icons.Filled.Key,
                         label = "Last.fm API key",
@@ -746,6 +753,9 @@ fun MainShell(
                                         musicController = musicController,
                                         onNext = ::skipToNext,
                                         onPrevious = ::skipToPrevious,
+                                        isFavorite = miniPlayerIsFavorite,
+                                        canFavorite = miniPlayerCanFavorite,
+                                        onToggleFavorite = ::toggleMiniPlayerFavorite,
                                         onMiniPlayerTap = {
                                             transitionMask = true
                                             navController.navigate(Routes.FULL_PLAYER)
@@ -906,6 +916,9 @@ fun MainShell(
                                 musicController = musicController,
                                 onNext = ::skipToNext,
                                 onPrevious = ::skipToPrevious,
+                                isFavorite = miniPlayerIsFavorite,
+                                canFavorite = miniPlayerCanFavorite,
+                                onToggleFavorite = ::toggleMiniPlayerFavorite,
                                 onMiniPlayerTap = {
                                     transitionMask = true
                                     navController.navigate(Routes.FULL_PLAYER)
@@ -1096,6 +1109,9 @@ private fun HomeMiniPlayerOverlay(
     musicController: MusicController,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    isFavorite: Boolean,
+    canFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
     onMiniPlayerTap: () -> Unit
 ) {
     // Keep the player in the content layer rather than the Scaffold bottom
@@ -1114,6 +1130,9 @@ private fun HomeMiniPlayerOverlay(
                 musicController = musicController,
                 onNext = onNext,
                 onPrevious = onPrevious,
+                isFavorite = isFavorite,
+                canFavorite = canFavorite,
+                onToggleFavorite = onToggleFavorite,
                 onMiniPlayerTap = onMiniPlayerTap
             )
         }

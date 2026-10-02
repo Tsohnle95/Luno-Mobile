@@ -87,6 +87,18 @@ fun LunoNavHost(
                     onNavigate()
                     navController.navigate(Routes.MADE_FOR_YOU)
                 },
+                onOpenDownloads = {
+                    onNavigate()
+                    navController.navigate(Routes.DOWNLOADS) {
+                        launchSingleTop = true
+                    }
+                },
+                onOpenRecents = {
+                    onNavigate()
+                    navController.navigate(Routes.RECENTS) {
+                        launchSingleTop = true
+                    }
+                },
                 onOpenSettings = onOpenSettings
             )
         }
@@ -181,7 +193,6 @@ fun LunoNavHost(
                     onNavigate()
                     navController.navigateUp()
                 },
-                onExportPlaylist = { id -> onExportPlaylists(listOf(id)) },
                 onExportTracks = onExportTracks,
                 virtualName = if (isFavoritesPlaylist) SystemPlaylists.FAVORITES_NAME else null,
                 virtualDescription = if (isFavoritesPlaylist) {

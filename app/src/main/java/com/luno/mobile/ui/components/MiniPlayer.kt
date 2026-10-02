@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -47,7 +49,10 @@ fun MiniPlayer(
     musicController: MusicController,
     onMiniPlayerTap: () -> Unit = {},
     onNext: () -> Unit,
-    onPrevious: () -> Unit = { musicController.skipToPrevious() }
+    onPrevious: () -> Unit = { musicController.skipToPrevious() },
+    isFavorite: Boolean = false,
+    canFavorite: Boolean = false,
+    onToggleFavorite: () -> Unit = {}
 ) {
     val isPlaying by musicController.isPlaying.collectAsState()
     val currentTrack by musicController.currentTrack.collectAsState()
@@ -159,6 +164,19 @@ fun MiniPlayer(
             }
 
             Spacer(modifier = Modifier.width(Dimens.paddingMedium))
+
+            IconButton(
+                onClick = onToggleFavorite,
+                enabled = canFavorite,
+                modifier = Modifier.size(Dimens.touchTargetMin)
+            ) {
+                Icon(
+                    imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                    tint = if (isFavorite) AccentGreen else SecondaryText,
+                    modifier = Modifier.size(Dimens.iconSize)
+                )
+            }
 
             // Play/Pause button
             IconButton(

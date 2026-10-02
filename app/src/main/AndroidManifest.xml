@@ -36,6 +36,14 @@
             android:name=".data.update.UpdateInstallReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".data.update.UpdateReplacedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".playback.MusicService"
             android:exported="true"

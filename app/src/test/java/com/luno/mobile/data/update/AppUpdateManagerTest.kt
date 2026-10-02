@@ -2,7 +2,11 @@ package com.luno.mobile.data.update
 
 import android.content.Context
 import android.content.Intent
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.pm.PackageInstaller
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.work.Configuration
@@ -182,5 +186,101 @@ class AppUpdateManagerTest {
         val recovered = withTimeout(5_000) { manager.state.first { it.transaction?.workId != missingWork } }
         assertThat(recovered.transaction?.phase).isEqualTo(UpdatePhase.DOWNLOADING)
         assertThat(recovered.transaction?.workId).isNotNull()
+    }
+
+    @Test
+    fun fullInstaller_keepsNativeProgressAndCompletionAndGrantsReadAccess() {
+        val uri = Uri.parse("content://com.luno.mobile.fileprovider/update/update.apk")
+        val intent = ApkInstaller.fullInstallerIntent(uri)
+        assertThat(intent.action).isEqualTo(Intent.ACTION_VIEW)
+        assertThat(intent.data).isEqualTo(uri)
+        assertThat(intent.type).isEqualTo("application/vnd.android.package-archive")
+        assertThat(intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION).isNotEqualTo(0)
+        assertThat(intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK).isEqualTo(0)
+        assertThat(intent.hasExtra(Intent.EXTRA_RETURN_RESULT)).isFalse()
+        assertThat(intent.hasExtra(PackageInstaller.EXTRA_SESSION_ID)).isFalse()
+    }
+
+    @Test
+    fun fullInstaller_launchesOnceAndCancellationKeepsVerifiedDownload() {
+        val workId = UUID.randomUUID().toString()
+        val file = AppUpdateWorker.updateFile(context, workId).apply { writeText("verified placeholder") }
+        store.save(UpdateTransaction(release, 5L, UpdatePhase.READY, workId))
+        shadowOf(context.packageManager).setCanRequestPackageInstalls(true)
+        val uri = Uri.parse("content://com.luno.mobile.fileprovider/update/update.apk")
+        var preparations = 0
+        val manager = AppUpdateManager(context, scope) { _, _ ->
+            preparations++
+            ApkInstaller.fullInstallerIntent(uri)
+        }
+        manager.installReady()
+        manager.installReady()
+        assertThat(preparations).isEqualTo(1)
+        assertThat(store.load()?.phase).isEqualTo(UpdatePhase.CONFIRM)
+        val intent = manager.confirmationIntent()!!
+        assertThat(intent.data).isEqualTo(uri)
+        assertThat(intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION).isNotEqualTo(0)
+        assertThat(manager.confirmationIntent()).isNull()
+        manager.onForeground()
+        assertThat(manager.state.value.transaction?.phase).isEqualTo(UpdatePhase.INSTALLING)
+        val restored = AppUpdateManager(context, scope)
+        restored.onForeground()
+        assertThat(restored.state.value.transaction?.phase).isEqualTo(UpdatePhase.INSTALLING)
+        assertThat(restored.confirmationIntent()).isNull()
+        restored.onInstallerReturned()
+        assertThat(restored.state.value.transaction?.phase).isEqualTo(UpdatePhase.READY)
+        assertThat(restored.state.value.transaction?.autoInstall).isFalse()
+        assertThat(restored.state.value.receipt).isNull()
+        assertThat(file.exists()).isTrue()
+    }
+
+    @Test
+    fun fullInstaller_returnAfterReplacementConfirmsActualVersion() {
+        store.save(UpdateTransaction(release, 5L, UpdatePhase.INSTALLING))
+        val manager = AppUpdateManager(context, scope)
+        val installed = shadowOf(context.packageManager).getInternalMutablePackageInfo(context.packageName)
+        installed.versionName = "1.0.5"
+        installed.setLongVersionCode(6L)
+        manager.onInstallerReturned()
+        assertThat(manager.state.value.transaction).isNull()
+        assertThat(manager.state.value.receipt).isEqualTo("1.0.5")
+    }
+
+    @Test
+    fun fullInstaller_preparationFailureAllowsRetryWithoutClaimingSuccess() {
+        val workId = UUID.randomUUID().toString()
+        AppUpdateWorker.updateFile(context, workId).writeText("placeholder")
+        store.save(UpdateTransaction(release, 5L, UpdatePhase.READY, workId))
+        shadowOf(context.packageManager).setCanRequestPackageInstalls(true)
+        val manager = AppUpdateManager(context, scope) { _, _ -> error("Cannot open APK") }
+        manager.installReady()
+        assertThat(manager.state.value.transaction?.phase).isEqualTo(UpdatePhase.FAILED)
+        assertThat(manager.state.value.transaction?.message).isEqualTo("Cannot open APK")
+        assertThat(manager.state.value.receipt).isNull()
+    }
+
+    @Test
+    fun replacementNotification_requiresPermissionAndAnActualUpdate() {
+        val manager = AppUpdateManager(context, scope)
+        val notifications = shadowOf(context.getSystemService(NotificationManager::class.java))
+        context.getSystemService(NotificationManager::class.java).cancelAll()
+        shadowOf(context as android.app.Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        manager.onPackageReplaced()
+        assertThat(notifications.allNotifications).isEmpty()
+        val installed = shadowOf(context.packageManager).getInternalMutablePackageInfo(context.packageName)
+        installed.versionName = "1.0.5"
+        installed.setLongVersionCode(6L)
+        shadowOf(context as android.app.Application).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        manager.onPackageReplaced()
+        assertThat(notifications.allNotifications).isEmpty()
+        shadowOf(context as android.app.Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        manager.onPackageReplaced()
+        val notification = notifications.allNotifications.single()
+        assertThat(notification.extras.getString(Notification.EXTRA_TITLE)).isEqualTo("Luno 1.0.5 installed")
+        assertThat(notification.actions.single().title.toString()).isEqualTo("Open Luno")
+        assertThat(shadowOf(notification.contentIntent).savedIntent.component?.className).isEqualTo("com.luno.mobile.MainActivity")
+        manager.acknowledgeReceipt()
+        manager.onPackageReplaced()
+        assertThat(notifications.allNotifications).isEmpty()
     }
 }

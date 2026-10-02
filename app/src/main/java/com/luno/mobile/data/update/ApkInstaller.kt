@@ -1,8 +1,11 @@
 package com.luno.mobile.data.update
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import androidx.core.content.FileProvider
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -88,6 +91,21 @@ object ApkInstaller {
         } finally {
             temporary.delete()
         }
+    }
+
+    internal suspend fun prepareInstallIntent(context: Context, file: File, release: GitHubRelease): Intent =
+        withContext(Dispatchers.IO) {
+            try { verify(context, file, release) }
+            catch (e: Exception) { file.delete(); throw e }
+            fullInstallerIntent(FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file))
+        }
+
+    internal fun fullInstallerIntent(uri: Uri): Intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "application/vnd.android.package-archive")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // The full installer owns scan/progress and Done/Open in its own process.
+        // EXTRA_RETURN_RESULT would skip its completion screen; an app-owned
+        // session confirmation would finish immediately after consent instead.
     }
 
     internal fun requireReleaseAssetUrl(url: HttpUrl) {

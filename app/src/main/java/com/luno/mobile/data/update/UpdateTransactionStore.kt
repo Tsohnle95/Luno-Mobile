@@ -76,6 +76,13 @@ internal class UpdateTransactionStore(private val preferences: SharedPreferences
 
     fun receipt(): String? = preferences.getString("receipt", null)
     fun acknowledge() { preferences.edit().remove("receipt").commit() }
+
+    fun claimCompletionNotification(): String? {
+        val version = receipt() ?: return null
+        if (preferences.getString("notifiedVersion", null) == version) return null
+        preferences.edit().putString("notifiedVersion", version).commit()
+        return version
+    }
 }
 
 internal fun isCompletedUpdate(transaction: UpdateTransaction?, version: String, code: Long): Boolean =

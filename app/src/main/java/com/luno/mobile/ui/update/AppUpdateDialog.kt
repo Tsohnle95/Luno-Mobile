@@ -51,10 +51,12 @@ import java.util.Locale
 /** Always composed by the shell; resumes permissions and native confirmation only in foreground. */
 @Composable
 fun AppUpdateHost(manager: AppUpdateManager, isOpen: Boolean, onDismiss: () -> Unit) {
-    val context = LocalContext.current
     val state by manager.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    val installerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        manager.onInstallerReturned()
+    }
     DisposableEffect(lifecycle, manager) {
         val observer = LifecycleEventObserver { _, event ->
             resumed = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
@@ -70,7 +72,7 @@ fun AppUpdateHost(manager: AppUpdateManager, isOpen: Boolean, onDismiss: () -> U
         if (transaction?.phase == UpdatePhase.READY && transaction.autoInstall) manager.installReady()
         if (transaction?.phase == UpdatePhase.CONFIRM && !transaction.confirmationLaunched) {
             manager.confirmationIntent()?.let { intent ->
-                try { context.startActivity(intent) } catch (_: Exception) { manager.confirmationFailed() }
+                try { installerLauncher.launch(intent) } catch (_: Exception) { manager.confirmationFailed() }
             }
         }
     }
@@ -151,11 +153,17 @@ private fun AppUpdateDialog(manager: AppUpdateManager, onDismiss: () -> Unit) {
                         }
                         UpdatePhase.READY -> Text(transaction.message ?: "Download verified. Ready to open Android's update screen.")
                         UpdatePhase.STAGING -> {
-                            LinearProgressIndicator(progress = { state.preparationProgress }, modifier = Modifier.fillMaxWidth(), color = AccentGreen)
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = AccentGreen)
                             Spacer(Modifier.height(8.dp))
-                            Text("Preparing the verified APK for Android…")
+                            Text("Checking the verified APK before opening Android's installer…")
                         }
-                        UpdatePhase.CONFIRM, UpdatePhase.INSTALLING -> Text("Confirm Update in Android's screen. Android shows installation progress. Luno will confirm the installed version when you reopen it.")
+                        UpdatePhase.CONFIRM, UpdatePhase.INSTALLING -> {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = AccentGreen)
+                            Spacer(Modifier.height(8.dp))
+                            Text("Continue in Android's installer. It handles security checks, installation progress and the final Open button.")
+                            Spacer(Modifier.height(8.dp))
+                            Text("Luno closes while Android replaces it. Tap Open when installation finishes to return here.", style = MaterialTheme.typography.bodySmall)
+                        }
                         UpdatePhase.FAILED -> Text(transaction.message ?: "The update did not finish. Please retry.")
                     }
                 } else if (state.checking) {
@@ -169,6 +177,7 @@ private fun AppUpdateDialog(manager: AppUpdateManager, onDismiss: () -> Unit) {
                         Text(result.release.notes.ifBlank { "A new release is ready to download." }, modifier = Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState()))
                         Spacer(Modifier.height(12.dp))
                         Text("Your library and favorites stay on this phone.", style = MaterialTheme.typography.bodySmall)
+                        Text("Android handles the final installation. Tap Open at the end to return to Luno.", style = MaterialTheme.typography.bodySmall)
                         if (result.release.apkUrl == null) Text("The release APK is not available yet. Check again shortly.")
                     }
                     is ReleaseCheckResult.UpToDate -> Text("You're up to date. No newer release is available.")
@@ -184,11 +193,7 @@ private fun AppUpdateDialog(manager: AppUpdateManager, onDismiss: () -> Unit) {
                 transaction?.phase in setOf(UpdatePhase.READY, UpdatePhase.FAILED) -> Button(onClick = manager::retry) {
                     Text(if (transaction?.workId != null && transaction.phase == UpdatePhase.FAILED) "Retry update" else "Install update")
                 }
-                transaction?.phase in setOf(UpdatePhase.CONFIRM, UpdatePhase.INSTALLING) && transaction?.confirmationUri != null -> TextButton(onClick = {
-                    manager.confirmationIntent()?.let { intent ->
-                        try { context.startActivity(intent) } catch (_: Exception) { manager.confirmationFailed() }
-                    }
-                }) { Text("Open Android installer", color = AccentGreen) }
+                transaction?.phase in setOf(UpdatePhase.CONFIRM, UpdatePhase.INSTALLING) -> TextButton(onClick = {}, enabled = false) { Text("Installation in Android") }
                 transaction != null -> TextButton(onClick = onDismiss) { Text("Keep using Luno", color = AccentGreen) }
                 state.checked is ReleaseCheckResult.UpdateAvailable -> {
                     val release = (state.checked as ReleaseCheckResult.UpdateAvailable).release
@@ -219,7 +224,7 @@ private fun stageLabel(state: AppUpdateState): String = when (state.transaction?
     UpdatePhase.READY -> "Ready to install"
     UpdatePhase.STAGING -> "Preparing installation"
     UpdatePhase.CONFIRM -> "Confirm in Android"
-    UpdatePhase.INSTALLING -> "Waiting for Android to finish"
+    UpdatePhase.INSTALLING -> "Installing in Android"
     UpdatePhase.FAILED -> "Update needs attention"
     null -> "App updates"
 }

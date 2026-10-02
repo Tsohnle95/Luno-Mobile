@@ -1,10 +1,8 @@
 package com.luno.mobile.data.update
 
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
-import android.os.Build
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
@@ -26,12 +24,17 @@ data class AppUpdateState(
     val checked: ReleaseCheckResult? = null,
     val bytes: Long = 0L,
     val total: Long = 0L,
-    val preparationProgress: Float = 0f,
     val receipt: String? = null
 )
 
-/** Owns one update across screens, permission activities, worker execution and APK replacement. */
-class AppUpdateManager(private val context: Context, private val scope: CoroutineScope) {
+/** Owns download/trust and receipts; Android's full installer owns native installation UI. */
+class AppUpdateManager internal constructor(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    private val prepareInstall: suspend (java.io.File, GitHubRelease) -> Intent = { file, release ->
+        ApkInstaller.prepareInstallIntent(context, file, release)
+    }
+) {
     private val store = UpdateTransactionStore(context.getSharedPreferences("app_updates", Context.MODE_PRIVATE))
     private val workManager = WorkManager.getInstance(context)
     private val installer = context.packageManager.packageInstaller
@@ -42,7 +45,7 @@ class AppUpdateManager(private val context: Context, private val scope: Coroutin
     init {
         reconcileInstalled()
         recoverDownload()
-        // A killed staging coroutine cannot complete its session; keep the verified download for retry.
+        // Recover interrupted preparation and legacy sessions created by 1.0.5/1.0.6.
         state.value.transaction?.takeIf {
             it.phase == UpdatePhase.STAGING || (it.phase == UpdatePhase.INSTALLING &&
                 it.sessionId?.let(installer::getSessionInfo)?.isSealed == false)
@@ -103,7 +106,7 @@ class AppUpdateManager(private val context: Context, private val scope: Coroutin
         continueAfterPermission()
         val transaction = state.value.transaction ?: return
         if (transaction.phase in setOf(UpdatePhase.INSTALLING, UpdatePhase.CONFIRM) &&
-            transaction.sessionId?.let(installer::getSessionInfo) == null) {
+            transaction.sessionId != null && installer.getSessionInfo(transaction.sessionId) == null) {
             save(transaction.copy(phase = UpdatePhase.FAILED, sessionId = null, confirmationUri = null,
                 message = "Android did not complete the update. Tap Retry installation to continue."))
         }
@@ -152,58 +155,37 @@ class AppUpdateManager(private val context: Context, private val scope: Coroutin
             return
         }
         save(transaction.copy(phase = UpdatePhase.STAGING, message = null, autoInstall = false))
-        mutableState.value = state.value.copy(preparationProgress = 0f)
         scope.launch(Dispatchers.Main.immediate) {
-            var sessionId: Int? = null
             try {
                 val file = AppUpdateWorker.updateFile(context, requireNotNull(transaction.workId))
-                withContext(Dispatchers.IO) {
-                    try { ApkInstaller.verify(context, file, transaction.release) }
-                    catch (e: Exception) { file.delete(); throw e }
-                }
-                val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-                    setAppPackageName(context.packageName)
-                    setSize(file.length())
-                    if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
-                }
-                sessionId = installer.createSession(params)
-                save(requireNotNull(state.value.transaction).copy(sessionId = sessionId))
-                installer.openSession(sessionId).use { session ->
-                    withContext(Dispatchers.IO) {
-                        session.openWrite("base.apk", 0L, file.length()).use { output ->
-                            file.inputStream().use { input ->
-                                val buffer = ByteArray(64 * 1024)
-                                var written = 0L
-                                while (true) {
-                                    val count = input.read(buffer)
-                                    if (count < 0) break
-                                    output.write(buffer, 0, count)
-                                    written += count
-                                    val progress = written.toFloat() / file.length()
-                                    withContext(Dispatchers.Main.immediate) {
-                                        mutableState.value = state.value.copy(preparationProgress = progress)
-                                    }
-                                }
-                            }
-                            session.fsync(output)
-                        }
-                    }
-                    save(requireNotNull(state.value.transaction).copy(phase = UpdatePhase.INSTALLING))
-                    val callback = Intent(context, UpdateInstallReceiver::class.java)
-                        .setAction("com.luno.mobile.UPDATE_INSTALL_RESULT")
-                    val pendingIntent = PendingIntent.getBroadcast(context, sessionId, callback,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
-                    session.commit(pendingIntent.intentSender)
-                }
+                val intent = prepareInstall(file, transaction.release)
+                save(requireNotNull(state.value.transaction).copy(phase = UpdatePhase.CONFIRM,
+                    sessionId = null, confirmationUri = intent.toUri(Intent.URI_INTENT_SCHEME),
+                    confirmationLaunched = false))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                sessionId?.let { runCatching { installer.abandonSession(it) } }
                 state.value.transaction?.let {
-                    save(it.copy(phase = UpdatePhase.FAILED, sessionId = null,
-                        message = e.message ?: "Could not prepare the update. Retry installation."))
+                    save(it.copy(phase = UpdatePhase.FAILED,
+                        message = e.message ?: "Could not open the Android installer. Retry installation."))
                 }
             }
+        }
+    }
+
+    fun onInstallerReturned() {
+        reconcileInstalled()
+        val transaction = state.value.transaction ?: return
+        if (transaction.phase != UpdatePhase.INSTALLING || transaction.sessionId != null) return
+        save(transaction.copy(phase = UpdatePhase.READY, confirmationUri = null,
+            confirmationLaunched = false, autoInstall = false,
+            message = "The update was not completed in Android. Your download is saved; tap Install update to retry."))
+    }
+
+    fun onPackageReplaced() {
+        reconcileInstalled()
+        if (UpdateCompletionNotifier.canNotify(context)) {
+            store.claimCompletionNotification()?.let { UpdateCompletionNotifier.show(context, it) }
         }
     }
 
@@ -232,9 +214,10 @@ class AppUpdateManager(private val context: Context, private val scope: Coroutin
 
     fun confirmationIntent(): Intent? {
         val transaction = state.value.transaction ?: return null
-        if (transaction.phase !in setOf(UpdatePhase.CONFIRM, UpdatePhase.INSTALLING)) return null
+        if (transaction.phase != UpdatePhase.CONFIRM || transaction.confirmationLaunched) return null
         val intent = transaction.confirmationUri?.let { runCatching { Intent.parseUri(it, Intent.URI_INTENT_SCHEME) }.getOrNull() }
             ?: return null
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         save(transaction.copy(phase = UpdatePhase.INSTALLING, confirmationLaunched = true))
         return intent
     }
@@ -262,6 +245,7 @@ class AppUpdateManager(private val context: Context, private val scope: Coroutin
 
     fun acknowledgeReceipt() {
         store.acknowledge()
+        UpdateCompletionNotifier.dismiss(context)
         mutableState.value = state.value.copy(receipt = null)
     }
 

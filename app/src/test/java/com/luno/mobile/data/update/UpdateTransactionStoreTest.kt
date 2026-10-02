@@ -90,4 +90,19 @@ class UpdateTransactionStoreTest {
         store.save(null)
         assertThat(UpdateTransactionStore(preferences).load()).isNull()
     }
+
+    @Test
+    fun completionNotification_isClaimedOnceOnlyAfterActualInstalledVersionChanges() {
+        val store = UpdateTransactionStore(preferences)
+        store.reconcile("1.0.4", 5L, false)
+        store.save(transaction.copy(phase = UpdatePhase.INSTALLING))
+        assertThat(store.claimCompletionNotification()).isNull()
+        store.reconcile("1.0.5", 6L, true)
+        assertThat(store.claimCompletionNotification()).isEqualTo("1.0.5")
+        assertThat(UpdateTransactionStore(preferences).claimCompletionNotification()).isNull()
+        assertThat(store.receipt()).isEqualTo("1.0.5")
+        store.acknowledge()
+        store.reconcile("1.0.6", 7L, true)
+        assertThat(store.claimCompletionNotification()).isEqualTo("1.0.6")
+    }
 }

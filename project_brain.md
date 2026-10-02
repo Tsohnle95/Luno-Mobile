@@ -89,9 +89,10 @@ state back to Room. Service restore and recents use private preferences. Keep
 these distinct recovery owners when changing lifetimes.
 
 App updates use a separate private transaction/receipt store, unique WorkManager
-APK download and Android PackageInstaller session. Compose delegates to the
+APK download and Android's full APK installer UI. Compose delegates to the
 application-scoped manager; actual installed version confirms success after
-process replacement. [Releases](ANDROID_RELEASES.md) owns these recovery rules.
+process replacement. A protected package-replaced receiver posts a completion
+notification when permission allows; Android's final Open button returns to Luno. [Releases](ANDROID_RELEASES.md) owns these recovery rules.
 
 Desktop development lives at
 https://github.com/Tsohnle95/Luno-Desktop. The archived Python/Tkinter

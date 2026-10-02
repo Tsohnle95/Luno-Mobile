@@ -82,15 +82,19 @@ from this source** and return to Luno; the download starts automatically. The
 screen shows percent/bytes, verification and installation preparation separately.
 Closing the screen keeps the WorkManager download running; a status banner lets
 you reopen it. **Cancel update** explicitly cancels the download. Android asks
-for confirmation and displays installation progress. Reopen Luno after installing
-to see **Updated successfully** with the actual installed version. That receipt
-stays until acknowledged. Installation cancellation/failure keeps the verified
-APK for retry. Users can also download directly from the release page.
+for confirmation and keeps its full installation screen visible through security
+checks and installation. Luno closes during replacement; tap Android's **Open**
+button when installation finishes. A completion notification also offers **Open
+Luno** when notifications are allowed. Luno confirms **Updated successfully**
+using the actual installed version; that receipt stays until acknowledged.
+Returning after cancellation keeps the verified APK ready to retry. Users can
+also download directly from the release page.
 
 The updater performing an upgrade is the version already installed. Updating
-from 1.0.4 uses its existing download screen; 1.0.5 confirms success on first
-launch and uses the persistent permission/download/session flow for subsequent
-updates. Fresh installations do not display an update success receipt.
+from 1.0.5/1.0.6 still uses their confirmation-only session handoff. Version 1.0.7
+uses the full Android installer for subsequent updates and adds a package
+replacement completion notification. Fresh installations do not display an
+update success receipt.
 
 The repository and release assets must be public for the anonymous in-app
 updater. Do not embed a GitHub credential in the APK. A private repository returns
@@ -158,16 +162,28 @@ cache files keep obsolete downloads separate; a missing cache can be downloaded
 again. Permission continuation is idempotent and only enqueues from its pending
 phase. Startup repairs the gap between saving a transaction and enqueueing work.
 
-Android PackageInstaller sessions own native confirmation and installation.
-[UpdateInstallReceiver](app/src/main/java/com/luno/mobile/data/update/UpdateInstallReceiver.kt)
-is an internal explicit mutable PendingIntent target. Persist session identity
-before commit and ignore stale session/worker results. Open native confirmation
-only from a resumed update screen. Interrupted preparation abandons its session
-and keeps the verified cache for retry; an already committed session can recover
-its confirmation handoff. Success is reconciled against PackageManager's actual
-installed version/code, not an activity handoff. First launch from older updaters
-uses Android's installation timestamps to bootstrap the receipt; acknowledgement
-and seen version prevent repeating it on subsequent launches.
+Android's full APK installer owns native confirmation, security checks, progress
+and its final Done/Open screen. The resumed Compose host launches an ACTION_VIEW
+APK intent with a FileProvider content URI/read grant through an activity-result
+launcher. Do not set EXTRA_RETURN_RESULT: Android must retain its completion UI.
+Do not replace this with an app-owned session confirmation: confirming that
+session finishes immediately and returns to Luno while installation continues.
+Persist and claim the handoff once before launch. Returning without an installed
+version change restores Ready with the cached APK and disables automatic retry.
+Interrupted preparation also restores Ready. Legacy session fields and the
+internal [UpdateInstallReceiver](app/src/main/java/com/luno/mobile/data/update/UpdateInstallReceiver.kt)
+remain to tolerate callbacks from an upgrade initiated by 1.0.5/1.0.6; stale
+session/worker results cannot change a newer transaction.
+
+Success is reconciled against PackageManager's actual installed version/code.
+[UpdateReplacedReceiver](app/src/main/java/com/luno/mobile/data/update/UpdateReplacedReceiver.kt)
+handles the protected MY_PACKAGE_REPLACED broadcast after process replacement;
+[UpdateCompletionNotifier](app/src/main/java/com/luno/mobile/data/update/UpdateCompletionNotifier.kt)
+posts a one-time completion notification with an explicit Open Luno activity
+PendingIntent when notification permission is already granted. Do not force a
+background activity launch. First launch from older updaters uses installation
+timestamps to bootstrap the receipt; acknowledgement and seen version prevent
+repetition on subsequent launches.
 [ApkInstaller](app/src/main/java/com/luno/mobile/data/update/ApkInstaller.kt)
 requires an initial HTTPS `github.com` URL under this repository's release
 download path, bounds bytes and follows only HTTPS redirects to GitHub's allowed
@@ -176,10 +192,10 @@ provided by release metadata, and compares Android-parsed package ID, signing
 certificates, versionName and versionCode against the installed app and release.
 It rejects a different key, another app, mismatched tag or non-increasing version
 code; Android's installer performs its own final signature/install validation.
-The APK is verified again before copying into Android's private install session.
+The APK is verified again before granting Android read access through FileProvider.
 [Manifest](app/src/main/AndroidManifest.xml) and
 [FileProvider paths](app/src/main/res/xml/file_paths.xml) own privileged permission,
-receiver registration and legacy cache exposure. Do not describe the initial-host
+receiver registration and APK cache exposure. Do not describe the initial-host
 check as redirect validation.
 
 [GitHubReleaseServiceTest](app/src/test/java/com/luno/mobile/data/update/GitHubReleaseServiceTest.kt)
@@ -189,8 +205,9 @@ covers package/version/certificate rejection and initial URL restrictions.
 [AppUpdateManagerTest](app/src/test/java/com/luno/mobile/data/update/AppUpdateManagerTest.kt)
 and [UpdateTransactionStoreTest](app/src/test/java/com/luno/mobile/data/update/UpdateTransactionStoreTest.kt)
 cover permission return without duplicate enqueue, cached retry/recovery, native
-session result filtering, persisted confirmation and one-time installed-version
-receipts. These checks use Robolectric and controlled workers; they do not prove
+legacy session result filtering, full installer intent flags, single-launch
+handoffs, cancelled-install recovery, notification permission and one-time
+installed-version receipts. These checks use Robolectric and controlled workers; they do not prove
 Android archive parsing, real permission, native installer launch or a signed
 update over an existing installation. Those require device evidence with the
 same signing key.

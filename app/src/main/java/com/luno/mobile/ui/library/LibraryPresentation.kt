@@ -58,7 +58,7 @@ import com.luno.mobile.ui.theme.PrimaryText
 import com.luno.mobile.ui.theme.SecondaryText
 import com.luno.mobile.ui.theme.SurfaceDark
 
-/** Concept 10's green corner light and faint shelves remain fixed behind the list. */
+/** Concept 10's green corner light stays fixed behind the list. */
 internal fun Modifier.libraryShelfBackground(): Modifier = drawWithCache {
     val glow = Brush.radialGradient(
         colorStops = arrayOf(0f to Color(0xFF19472D), 0.6f to Color.Transparent),
@@ -67,7 +67,6 @@ internal fun Modifier.libraryShelfBackground(): Modifier = drawWithCache {
     )
     val horizontalRadius = size.width * 0.65f * kotlin.math.sqrt(2f)
     val verticalRadius = size.height * kotlin.math.sqrt(2f)
-    val shelfSpacing = 120.dp.toPx()
     onDrawBehind {
         drawRect(PrimaryBackground)
         withTransform({
@@ -75,12 +74,6 @@ internal fun Modifier.libraryShelfBackground(): Modifier = drawWithCache {
             scale(horizontalRadius, verticalRadius, pivot = Offset.Zero)
         }) {
             drawCircle(glow, radius = 1f, center = Offset.Zero)
-        }
-        var shelfY = shelfSpacing - 1.dp.toPx()
-        while (shelfY < size.height) {
-            drawLine(Color.White.copy(alpha = 0.016f), Offset(0f, shelfY),
-                Offset(size.width, shelfY), strokeWidth = 1.dp.toPx())
-            shelfY += shelfSpacing
         }
     }
 }

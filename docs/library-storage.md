@@ -66,7 +66,7 @@ unexpectedly delete source audio. Download destination publication is owned by
 uses the selected record-shelf direction from [the design gallery](../design/README.md).
 [LibraryHeader](../app/src/main/java/com/luno/mobile/ui/library/LibraryPresentation.kt)
 uses concept 10's title, playback cluster and view/sort line over its green corner
-light and faint horizontal shelves. The shell draws this Library background
+light. The shell draws this Library background
 across the edge-to-edge window, including the transparent status bar, while the
 list scrolls above it; this keeps the green treatment continuous at the top.
 Library owns its header; the shell omits the Luno wordmark here. Playlist

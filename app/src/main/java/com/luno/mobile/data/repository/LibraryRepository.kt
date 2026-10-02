@@ -955,9 +955,15 @@ class LibraryRepository(
     suspend fun deleteTrack(uri: String) = trackDao.deleteTrack(uri)
 
     /** Records global song popularity and, when applicable, playlist popularity. */
-    suspend fun recordPlayback(uri: String, playlistId: Long? = null) {
+    suspend fun recordPlayback(
+        uri: String,
+        playlistId: Long? = null,
+        playedAt: Long = System.currentTimeMillis()
+    ) {
         trackDao.incrementPlayCount(uri)
-        playlistId?.let { playlistDao?.incrementPlayCount(it) }
+        playlistId
+            ?.takeIf { it > 0L }
+            ?.let { id -> playlistDao?.recordPlayback(id, playedAt) }
     }
 
     /**

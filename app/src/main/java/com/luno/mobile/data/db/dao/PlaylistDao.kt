@@ -44,8 +44,8 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists WHERE id = :id")
     suspend fun getPlaylist(id: Long): Playlist?
 
-    @Query("UPDATE playlists SET playCount = playCount + 1 WHERE id = :playlistId")
-    suspend fun incrementPlayCount(playlistId: Long)
+    @Query("UPDATE playlists SET playCount = playCount + 1, lastPlayedAt = :playedAt WHERE id = :playlistId")
+    suspend fun recordPlayback(playlistId: Long, playedAt: Long)
 
     @Query("SELECT * FROM playlists WHERE name = :name LIMIT 1")
     suspend fun getPlaylistByName(name: String): Playlist?

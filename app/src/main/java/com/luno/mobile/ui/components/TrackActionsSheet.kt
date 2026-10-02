@@ -16,8 +16,8 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.RemoveCircleOutline
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -193,7 +193,7 @@ fun TrackActionsSheet(
                 Spacer(modifier = Modifier.height(Dimens.paddingMedium))
 
                 TrackActionRow(
-                    icon = if (track.isFavorite) Icons.Filled.Star else Icons.Filled.StarBorder,
+                    icon = if (track.isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                     label = if (track.isFavorite) "Remove from favorites" else "Add to favorites",
                     onClick = {
                         scope.launch {

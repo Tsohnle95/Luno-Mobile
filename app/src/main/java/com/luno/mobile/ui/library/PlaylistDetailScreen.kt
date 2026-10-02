@@ -2,7 +2,7 @@ package com.luno.mobile.ui.library
 
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,21 +21,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,10 +54,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.luno.mobile.LunoApp
 import com.luno.mobile.data.db.dao.PlaylistWithTracks
@@ -66,7 +68,6 @@ import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.playback.MediaTrack
 import com.luno.mobile.playback.MusicController
 import com.luno.mobile.playback.PlaybackSource
-import com.luno.mobile.ui.components.ArtworkCollage
 import com.luno.mobile.ui.components.BulkSelectionToolbar
 import com.luno.mobile.ui.components.RecommendationArtworkImage
 import com.luno.mobile.ui.components.SortChip
@@ -74,7 +75,6 @@ import com.luno.mobile.ui.components.TrackActionsSheet
 import com.luno.mobile.ui.components.TrackSortMode
 import com.luno.mobile.ui.components.sortedByMode
 import com.luno.mobile.ui.components.sortedByPlaylistMembership
-import com.luno.mobile.ui.player.formatTime
 import com.luno.mobile.ui.theme.AccentGreen
 import com.luno.mobile.ui.theme.Dimens
 import com.luno.mobile.ui.theme.PrimaryText
@@ -84,11 +84,9 @@ import com.luno.mobile.ui.theme.SurfaceElevated
 import kotlinx.coroutines.launch
 
 /**
- * Playlist detail view (Spotify-inspired): a 2x2 collage of up to four
- * track artworks as the header art, playlist name, description, track
- * count + total duration, play-all button, and the track list.  Tapping a
- * track plays the playlist from that track; long-press opens track
- * actions (add to playlist / delete).
+ * Shared playlist detail screen with cover art, Luno attribution, duration,
+ * playlist controls and ordered tracks. Tapping a track starts the playlist
+ * at that position; long-press opens track actions.
  */
 @Composable
 fun PlaylistDetailScreen(
@@ -110,8 +108,7 @@ fun PlaylistDetailScreen(
     // sorts by each track's library-added timestamp.
     var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.PLAYLIST_ORDER) }
 
-    // In-playlist search query — filters the track list (and therefore the
-    // play context) by title/artist/album, Spotify style.
+    // In-playlist search filters both the track list and its play context.
     var query by rememberSaveable { mutableStateOf("") }
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var favoritesFirst by rememberSaveable { mutableStateOf(false) }
@@ -216,36 +213,6 @@ fun PlaylistDetailScreen(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = Dimens.paddingXLarge)
     ) {
-        item {
-            // Top bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Dimens.paddingSmall),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = PrimaryText,
-                        modifier = Modifier.size(Dimens.iconSize)
-                    )
-                }
-                if (virtualTracks == null && playlistId > 0L) {
-                    IconButton(onClick = { onExportPlaylist(playlistId) }) {
-                        Icon(
-                            imageVector = Icons.Filled.UploadFile,
-                            contentDescription = "Export playlist",
-                            tint = AccentGreen,
-                            modifier = Modifier.size(Dimens.iconSize)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.weight(1f))
-            }
-        }
-
         if (selectionMode) {
             item {
                 BulkSelectionToolbar(
@@ -292,20 +259,23 @@ fun PlaylistDetailScreen(
             }
         }
 
+        item(key = "playlist-cover", contentType = "playlist-cover") {
+            PlaylistArtworkHero(
+                name = playlistName,
+                description = playlistDescription,
+                tracks = tracks,
+                onBack = onBack,
+                onExport = if (virtualTracks == null && playlistId > 0L) {
+                    { onExportPlaylist(playlistId) }
+                } else {
+                    null
+                }
+            )
+        }
+
         if (tracks.isEmpty()) {
-            // Header without tracks
-            item {
-                ArtworkCollage(
-                    tracks = tracks,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Dimens.paddingLarge)
-                )
-            }
             item {
                 PlaylistHeader(
-                    name = playlistName,
-                    description = playlistDescription,
                     trackCount = 0,
                     totalDurationMs = 0L,
                     onPlayAll = null
@@ -320,20 +290,8 @@ fun PlaylistDetailScreen(
                 )
             }
         } else {
-            // Header: 2x2 collage of the first four track artworks
-            item {
-                ArtworkCollage(
-                    tracks = tracks,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Dimens.paddingLarge)
-                )
-            }
-
             item {
                 PlaylistHeader(
-                    name = playlistName,
-                    description = playlistDescription,
                     trackCount = tracks.size,
                     totalDurationMs = tracks.sumOf { it.durationMs },
                     onPlayAll = {
@@ -466,9 +424,132 @@ fun PlaylistDetailScreen(
 }
 
 @Composable
-private fun PlaylistHeader(
+private fun PlaylistArtworkHero(
     name: String,
     description: String,
+    tracks: List<Track>,
+    onBack: () -> Unit,
+    onExport: (() -> Unit)?
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1.12f)
+    ) {
+        val cover = tracks.firstOrNull()
+        RecommendationArtworkImage(
+            artist = cover?.artist ?: name,
+            title = cover?.title ?: name,
+            artworkUri = cover?.albumArtUri(),
+            modifier = Modifier.fillMaxSize(),
+            shape = RectangleShape,
+            placeholderIconSize = 56.dp,
+            decodeSizePx = 1024
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.24f),
+                        0.45f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.88f)
+                    )
+                )
+        )
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .padding(horizontal = Dimens.paddingSmall, vertical = Dimens.paddingSmall),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.38f))
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White,
+                    modifier = Modifier.size(Dimens.iconSize)
+                )
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            if (onExport != null) {
+                IconButton(
+                    onClick = onExport,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.38f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.UploadFile,
+                        contentDescription = "Export playlist",
+                        tint = Color.White,
+                        modifier = Modifier.size(Dimens.iconSize)
+                    )
+                }
+            }
+        }
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(horizontal = Dimens.paddingLarge, vertical = Dimens.paddingMedium)
+        ) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.headlineLarge,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (description.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.88f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LunoAttribution(modifier: Modifier = Modifier) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(width = 5.dp, height = 17.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(AccentGreen)
+        )
+        Spacer(modifier = Modifier.width(Dimens.paddingSmall))
+        Text(
+            text = "Luno",
+            style = MaterialTheme.typography.titleSmall,
+            color = PrimaryText,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+internal fun formatPlaylistDuration(durationMs: Long): String {
+    val totalMinutes = durationMs.coerceAtLeast(0L) / 60_000L
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    return if (hours > 0L) "$hours hr $minutes min" else "$minutes min"
+}
+
+@Composable
+private fun PlaylistHeader(
     trackCount: Int,
     totalDurationMs: Long,
     onPlayAll: (() -> Unit)?,
@@ -482,113 +563,54 @@ private fun PlaylistHeader(
     onFavoritesFirstChange: ((Boolean) -> Unit)? = null
 ) {
     Column(modifier = Modifier.padding(horizontal = Dimens.paddingLarge)) {
-        Spacer(modifier = Modifier.height(Dimens.paddingLarge))
+        Spacer(modifier = Modifier.height(Dimens.paddingMedium))
         Row(verticalAlignment = Alignment.CenterVertically) {
+            LunoAttribution(modifier = Modifier.weight(1f))
             Text(
-                text = name,
-                style = MaterialTheme.typography.headlineMedium,
-                color = PrimaryText,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            if (onSearch != null) {
-                IconButton(onClick = onSearch) {
-                    Icon(
-                        imageVector = Icons.Filled.Search,
-                        contentDescription = if (searchVisible) {
-                            "Hide playlist search"
-                        } else {
-                            "Search playlist"
-                        },
-                        tint = PrimaryText,
-                        modifier = Modifier.size(Dimens.iconSize)
-                    )
-                }
-            }
-        }
-        if (description.isNotBlank()) {
-            Spacer(modifier = Modifier.height(Dimens.paddingSmall))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
+                text = "$trackCount songs · ${formatPlaylistDuration(totalDurationMs)}",
+                style = MaterialTheme.typography.bodySmall,
                 color = SecondaryText
             )
         }
         Spacer(modifier = Modifier.height(Dimens.paddingSmall))
-        Text(
-            text = "$trackCount songs · ${formatTime(totalDurationMs)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = SecondaryText
-        )
-        Spacer(modifier = Modifier.height(Dimens.paddingLarge))
 
         if (onPlayAll != null) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(
-                    onClick = onPlayAll,
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(Dimens.iconSize)
-                    )
-                    Spacer(modifier = Modifier.width(Dimens.paddingSmall))
-                    Text("Play")
-                }
-                if (onShuffleAll != null) {
-                    Spacer(modifier = Modifier.width(Dimens.paddingLarge))
-                    // Shuffle — desktop All-Music style (icon + text,
-                    // no box), plays the playlist shuffled.
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(Dimens.cornerMedium))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = onShuffleAll
-                            )
-                            .padding(vertical = Dimens.paddingSmall),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                if (onSearch != null) {
+                    IconButton(onClick = onSearch) {
                         Icon(
-                            imageVector = Icons.Filled.Shuffle,
-                            contentDescription = null,
-                            tint = AccentGreen,
-                            modifier = Modifier.size(Dimens.iconSize)
-                        )
-                        Spacer(modifier = Modifier.width(Dimens.paddingSmall))
-                        Text(
-                            text = "Shuffle",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = AccentGreen,
-                            fontWeight = if (shuffleActive) {
-                                FontWeight.Bold
+                            imageVector = Icons.Filled.Search,
+                            contentDescription = if (searchVisible) {
+                                "Hide playlist search"
                             } else {
-                                FontWeight.Medium
+                                "Search playlist"
                             },
-                            textDecoration = if (shuffleActive) {
-                                TextDecoration.Underline
-                            } else {
-                                TextDecoration.None
-                            }
+                            tint = PrimaryText,
+                            modifier = Modifier.size(Dimens.iconSize)
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.weight(1f))
+                if (onShuffleAll != null) {
+                    IconButton(onClick = onShuffleAll) {
+                        Icon(
+                            imageVector = Icons.Filled.Shuffle,
+                            contentDescription = "Shuffle playlist",
+                            tint = if (shuffleActive) AccentGreen else SecondaryText,
+                            modifier = Modifier.size(Dimens.iconSize)
+                        )
+                    }
+                }
 
                 if (onFavoritesFirstChange != null) {
                     IconButton(onClick = { onFavoritesFirstChange(!favoritesFirst) }) {
                         Icon(
                             imageVector = if (favoritesFirst) {
-                                Icons.Filled.Star
+                                Icons.Filled.Favorite
                             } else {
-                                Icons.Filled.StarBorder
+                                Icons.Filled.FavoriteBorder
                             },
                             contentDescription = if (favoritesFirst) {
                                 "Show favorites first"
@@ -601,13 +623,28 @@ private fun PlaylistHeader(
                     }
                 }
 
-                // Filter menu stays opposite Play at the far right.
                 if (onSortModeChange != null) {
                     SortChip(
                         mode = sortMode,
                         onModeChange = onSortModeChange,
                         compact = true,
                         availableModes = TrackSortMode.PLAYLIST_MODES
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(
+                    onClick = onPlayAll,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(AccentGreen)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = "Play playlist",
+                        tint = Color.Black,
+                        modifier = Modifier.size(32.dp)
                     )
                 }
             }
@@ -679,7 +716,7 @@ private fun PlaylistTrackRow(
         }
         if (showFavoriteIcon && track.isFavorite) {
             Icon(
-                imageVector = Icons.Filled.Star,
+                imageVector = Icons.Filled.Favorite,
                 contentDescription = "Favorite",
                 tint = AccentGreen,
                 modifier = Modifier

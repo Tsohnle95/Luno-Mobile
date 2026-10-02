@@ -37,7 +37,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
@@ -627,30 +626,6 @@ fun MainShell(
                             app.artworkFetchManager.start()
                         }
                     )
-                }
-                SettingsAccordion(
-                    title = "Downloads",
-                    icon = Icons.Filled.Download,
-                    expanded = expandedSettingsSection == "downloads",
-                    onToggle = {
-                        expandedSettingsSection = if (expandedSettingsSection == "downloads") {
-                            null
-                        } else {
-                            "downloads"
-                        }
-                    }
-                ) {
-                    DrawerItem(
-                        icon = Icons.Filled.Download,
-                        label = "Downloads",
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            transitionMask = true
-                            navController.navigate(Routes.DOWNLOADS) {
-                                launchSingleTop = true
-                            }
-                        }
-                    )
                     DrawerItem(
                         icon = Icons.Filled.UploadFile,
                         label = "Export / Import",
@@ -788,12 +763,13 @@ fun MainShell(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    // App header: "Luno" with the small green bar to its
-                    // right (desktop sidebar logo style).  Hidden on the
-                    // full player, which is truly full-screen.  The title
-                    // itself is a button: tapping it opens the Settings
-                    // drawer, like the Home green-circle icon.
-                    if (currentRoute != Routes.FULL_PLAYER) {
+                    // Home uses its compact greeting/settings row. Playlist
+                    // detail uses a full-width artwork header with its own
+                    // overlaid back control.
+                    if (currentRoute != Routes.FULL_PLAYER &&
+                        currentRoute != Routes.HOME &&
+                        currentRoute != Routes.PLAYLIST_DETAIL
+                    ) {
                         AppHeader(onClick = { scope.launch { drawerState.open() } })
                     }
                     // Live music-folder import progress (Settings drawer
@@ -907,6 +883,7 @@ fun MainShell(
                             musicController = musicController,
                             modifier = Modifier.fillMaxSize(),
                             onCreatePlaylist = { showCreateSheet = true },
+                            onOpenSettings = { scope.launch { drawerState.open() } },
                             onPlay = onPlay,
                             onNavigate = { transitionMask = true },
                             onExportTracks = ::exportTracks,

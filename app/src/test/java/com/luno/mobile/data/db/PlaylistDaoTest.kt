@@ -22,13 +22,14 @@ class PlaylistDaoTest : AppDatabaseTest() {
     }
 
     @Test
-    fun incrementPlayCount_onlyChangesThePlaylistCount() = runBlocking {
+    fun recordPlayback_updatesCountAndRecency() = runBlocking {
         val playlistId = playlistDao.insertPlaylist(Playlist(name = "Rap"))
 
-        playlistDao.incrementPlayCount(playlistId)
-        playlistDao.incrementPlayCount(playlistId)
+        playlistDao.recordPlayback(playlistId, playedAt = 1234L)
+        playlistDao.recordPlayback(playlistId, playedAt = 5678L)
 
         assertThat(playlistDao.getPlaylist(playlistId)?.playCount).isEqualTo(2)
+        assertThat(playlistDao.getPlaylist(playlistId)?.lastPlayedAt).isEqualTo(5678L)
     }
 
     @Test

@@ -1,12 +1,116 @@
 package com.luno.mobile.ui.home
 
 import com.google.common.truth.Truth.assertThat
+import com.luno.mobile.data.db.dao.PlaylistWithTracks
 import com.luno.mobile.data.db.entity.DownloadJob
 import com.luno.mobile.data.db.entity.DownloadState
+import com.luno.mobile.data.db.entity.Playlist
 import com.luno.mobile.data.db.entity.Track
+import com.luno.mobile.playback.MediaTrack
+import com.luno.mobile.playback.PlaybackSource
+import com.luno.mobile.ui.library.formatPlaylistDuration
 import org.junit.Test
 
 class HomeScreenTest {
+    @Test
+    fun recentlyPlayedPlaylists_returnsSixNewestPersistedPlaylistsOnly() {
+        val playlists = (1L..8L).map { id ->
+            PlaylistWithTracks(
+                playlist = Playlist(
+                    id = id,
+                    name = "Playlist $id",
+                    lastPlayedAt = if (id == 8L) 0L else id * 100L
+                ),
+                tracks = emptyList()
+            )
+        }
+
+        val result = recentlyPlayedPlaylists(playlists)
+
+        assertThat(result.map { it.playlist.id })
+            .containsExactly(7L, 6L, 5L, 4L, 3L, 2L)
+            .inOrder()
+    }
+
+    @Test
+    fun recentlyPlayedPlaylists_breaksEqualTimestampsByNewestPlaylistId() {
+        val playlists = listOf(2L, 5L, 3L).map { id ->
+            PlaylistWithTracks(
+                playlist = Playlist(id = id, name = "Playlist $id", lastPlayedAt = 100L),
+                tracks = emptyList()
+            )
+        }
+
+        assertThat(recentlyPlayedPlaylists(playlists, limit = 2).map { it.playlist.id })
+            .containsExactly(5L, 3L)
+            .inOrder()
+    }
+
+    @Test
+    fun recentlyPlayedPlaylists_respectsNonPositiveLimits() {
+        val playlist = PlaylistWithTracks(
+            playlist = Playlist(id = 1L, name = "Playlist", lastPlayedAt = 1L),
+            tracks = emptyList()
+        )
+
+        assertThat(recentlyPlayedPlaylists(listOf(playlist), limit = 0)).isEmpty()
+    }
+
+    @Test
+    fun recentlyPlayedPlaylists_restoresLegacyOrderFromSavedTrackHistory() {
+        val playlists = (1L..4L).map { id ->
+            PlaylistWithTracks(
+                playlist = Playlist(id = id, name = "Playlist $id"),
+                tracks = emptyList()
+            )
+        }
+        val history = listOf(3L, 1L, 3L, -2L).mapIndexed { index, playlistId ->
+            MediaTrack(
+                uri = "track://$index",
+                title = "Track $index",
+                artist = "Artist",
+                playbackSource = PlaybackSource("Playlist", playlistId = playlistId)
+            )
+        }
+
+        assertThat(recentlyPlayedPlaylists(playlists, history).map { it.playlist.id })
+            .containsExactly(3L, 1L)
+            .inOrder()
+    }
+
+    @Test
+    fun recentlyPlayedPlaylists_persistedTimestampsPrecedeLegacyHistory() {
+        val playlists = listOf(
+            PlaylistWithTracks(
+                playlist = Playlist(id = 1L, name = "Old", lastPlayedAt = 0L),
+                tracks = emptyList()
+            ),
+            PlaylistWithTracks(
+                playlist = Playlist(id = 2L, name = "New", lastPlayedAt = 500L),
+                tracks = emptyList()
+            )
+        )
+        val history = listOf(
+            MediaTrack(
+                uri = "track://old",
+                title = "Old track",
+                artist = "Artist",
+                playbackSource = PlaybackSource("Playlist", playlistId = 1L)
+            )
+        )
+
+        assertThat(recentlyPlayedPlaylists(playlists, history).map { it.playlist.id })
+            .containsExactly(2L, 1L)
+            .inOrder()
+    }
+
+    @Test
+    fun formatPlaylistDuration_displaysHoursAndRemainingMinutes() {
+        assertThat(formatPlaylistDuration(3_725_000L)).isEqualTo("1 hr 2 min")
+        assertThat(formatPlaylistDuration(125_000L)).isEqualTo("2 min")
+        assertThat(formatPlaylistDuration(-1L)).isEqualTo("0 min")
+    }
+
     @Test
     fun catalogueKeyIgnoresMutableTrackMetadata() {
         val before = listOf(

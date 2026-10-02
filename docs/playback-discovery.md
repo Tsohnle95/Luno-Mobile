@@ -27,7 +27,11 @@ callback authorization/command handling when changing external control behavior.
 and controller `METADATA_*` extras carry identity, playlist/source, duration,
 transient status and selective artwork flags across the MediaItem boundary.
 Transient previews must neither enter recents nor trigger Room popularity
-recording. [RecentlyPlayedStore](../app/src/main/java/com/luno/mobile/playback/RecentlyPlayedStore.kt)
+recording. For a non-transient media-item transition, `MainActivity` passes the
+playlist ID from that source to `LibraryRepository.recordPlayback`; the library
+repository persists playlist play count and last-played time in Room. A queue
+without a real playlist ID does not update playlist recency.
+[RecentlyPlayedStore](../app/src/main/java/com/luno/mobile/playback/RecentlyPlayedStore.kt)
 persists URI-deduplicated, most-recent-first history in preferences independently
 of Room. Notification artwork enrichment is deliberately selective: embedding
 artwork bytes into an entire large library queue can cause memory termination.

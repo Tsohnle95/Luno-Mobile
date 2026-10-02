@@ -76,6 +76,8 @@ android {
 
     // Exercise the same language-neutral transfer fixtures as the desktop.
     sourceSets.getByName("test").resources.srcDir(rootProject.file("contracts/library-export/v1"))
+    // Migration regression tests open legacy Room schema snapshots directly.
+    sourceSets.getByName("test").resources.srcDir("$projectDir/schemas")
 }
 
 // Room schema export location via KSP

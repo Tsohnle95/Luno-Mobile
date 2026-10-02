@@ -12,6 +12,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.luno.mobile.data.db.AppDatabase
+import com.luno.mobile.data.db.entity.Playlist
 import com.luno.mobile.data.db.entity.Track
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.flow.first
@@ -78,6 +79,23 @@ class LibraryRepositoryTest {
 
     private suspend fun trackTitles(): List<String> =
         database.trackDao().getAllTracks().first().map { it.title }
+
+    @Test
+    fun recordPlayback_persistsPlaylistRecencyAndIgnoresVirtualPlaylistIds() = runBlocking<Unit> {
+        val track = Track(uri = "content://test/recent-playback", title = "Recent")
+        database.trackDao().insertTrack(track)
+        val playlistId = database.playlistDao().insertPlaylist(
+            Playlist(name = "Recent playlist")
+        )
+
+        repository.recordPlayback(track.uri, playlistId, playedAt = 42L)
+
+        assertThat(database.playlistDao().getPlaylist(playlistId)?.lastPlayedAt).isEqualTo(42L)
+        assertThat(database.playlistDao().getPlaylist(playlistId)?.playCount).isEqualTo(1)
+
+        repository.recordPlayback(track.uri, -2L, playedAt = 84L)
+        assertThat(database.playlistDao().getPlaylist(playlistId)?.lastPlayedAt).isEqualTo(42L)
+    }
 
     @Test
     fun updateTrackMetadata_persistsSearchableTitleAndArtist(): Unit = runBlocking {

@@ -49,6 +49,7 @@ fun LunoNavHost(
     musicController: MusicController,
     modifier: Modifier = Modifier,
     onCreatePlaylist: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     onPlay: (List<MediaTrack>, Int, Boolean) -> Unit = { _, _, _ -> },
     onNavigate: () -> Unit = {},
     onDiscoverLoadingChanged: (Boolean) -> Unit = {},
@@ -85,7 +86,8 @@ fun LunoNavHost(
                 onOpenMadeForYou = {
                     onNavigate()
                     navController.navigate(Routes.MADE_FOR_YOU)
-                }
+                },
+                onOpenSettings = onOpenSettings
             )
         }
         composable(Routes.MADE_FOR_YOU) {

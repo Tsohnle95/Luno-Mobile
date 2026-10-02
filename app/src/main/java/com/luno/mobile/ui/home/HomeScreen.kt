@@ -7,7 +7,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +19,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -32,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,8 +50,6 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,6 +64,7 @@ import com.luno.mobile.playback.MediaTrack
 import com.luno.mobile.playback.MusicController
 import com.luno.mobile.playback.PlaybackSource
 import com.luno.mobile.ui.components.BulkSelectionToolbar
+import com.luno.mobile.ui.components.ArtworkCollage
 import com.luno.mobile.ui.components.MiniPlayerOverlayHeight
 import com.luno.mobile.ui.components.RecommendationArtworkImage
 import com.luno.mobile.ui.components.TrackActionsSheet
@@ -75,7 +73,6 @@ import com.luno.mobile.ui.theme.Dimens
 import com.luno.mobile.ui.theme.PrimaryText
 import com.luno.mobile.ui.theme.SecondaryText
 import com.luno.mobile.ui.theme.SurfaceDark
-import com.luno.mobile.ui.theme.SurfaceElevated
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -117,19 +114,45 @@ internal fun recentlyDownloadedTracks(
     .take(limit.coerceAtLeast(0))
     .toList()
 
+/** Returns the six most recently played real playlists, newest first. */
+internal fun recentlyPlayedPlaylists(
+    playlists: List<PlaylistWithTracks>,
+    playbackHistory: List<MediaTrack> = emptyList(),
+    limit: Int = 6
+): List<PlaylistWithTracks> {
+    val playlistsById = playlists.associateBy { it.playlist.id }
+    val persistedRecency = playlists
+        .asSequence()
+        .filter { it.playlist.lastPlayedAt > 0L }
+        .sortedWith(
+            compareByDescending<PlaylistWithTracks> { it.playlist.lastPlayedAt }
+                .thenByDescending { it.playlist.id }
+        )
+    val restoredHistory = playbackHistory
+        .asSequence()
+        .mapNotNull { it.playbackSource?.playlistId }
+        .filter { it > 0L }
+        .distinct()
+        .mapNotNull(playlistsById::get)
+        .filter { it.playlist.lastPlayedAt == 0L }
+
+    return (persistedRecency + restoredHistory)
+        .distinctBy { it.playlist.id }
+        .take(limit.coerceAtLeast(0))
+        .toList()
+}
+
 /**
- * Spotify-inspired Home: greeting, edge-clipped "Recently played" and
- * randomized 50-song "Made for you" carousel, and local "Most popular" song
- * and playlist carousels. The Settings drawer is opened from the tappable
- * "Luno" app header instead
- * of a profile icon.
+ * Home greeting, a persisted recent-playlist grid, and the existing local
+ * library carousels. Settings is opened from the gear beside the greeting.
  */
 @Composable
 fun HomeScreen(
     musicController: MusicController,
     onPlay: (List<MediaTrack>, Int, Boolean) -> Unit = { _, _, _ -> },
     onOpenPlaylist: (Long) -> Unit = {},
-    onOpenMadeForYou: () -> Unit = {}
+    onOpenMadeForYou: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as LunoApp
@@ -157,7 +180,6 @@ fun HomeScreen(
     }
 
     val greeting = getGreeting()
-    val displayName = "Listener" // Editable in future
 
     // Hoisted scroll states: keeping the parent state at screen level avoids
     // losing the vertical anchor when Home recomposes after a Room emission.
@@ -355,6 +377,9 @@ fun HomeScreen(
             )
             .take(10)
     }
+    val recentPlaylists = remember(homePlaylists, homeRecentlyPlayed) {
+        recentlyPlayedPlaylists(homePlaylists, homeRecentlyPlayed)
+    }
 
     var selectionMode by remember { mutableStateOf(false) }
     var selectedKeys by remember { mutableStateOf(setOf<String>()) }
@@ -369,7 +394,8 @@ fun HomeScreen(
         madeForYou,
         favoriteTracks,
         popularTracks,
-        popularPlaylists
+        popularPlaylists,
+        recentPlaylists
     ) {
         buildSet {
             addAll(homeRecentlyPlayed.map { it.uri })
@@ -378,6 +404,7 @@ fun HomeScreen(
             addAll(favoriteTracks.map { it.uri })
             addAll(popularTracks.map { it.uri })
             addAll(popularPlaylists.map { "p${it.playlist.id}" })
+            addAll(recentPlaylists.map { "p${it.playlist.id}" })
         }
     }
     val scope = rememberCoroutineScope()
@@ -418,16 +445,25 @@ fun HomeScreen(
         item(key = "greeting", contentType = "hero") {
             HomeHero(
                 greeting = greeting,
-                displayName = displayName,
-                trackCount = homeTracks.size,
-                mixCount = madeForYou.size,
-                onClick = if (homeTracks.isEmpty()) null else {
-                    {
-                        app.setMadeForYouTracks(madeForYou)
-                        onOpenMadeForYou()
-                    }
-                }
+                onOpenSettings = onOpenSettings
             )
+        }
+
+        if (recentPlaylists.isNotEmpty()) {
+            item(key = "recent-playlists", contentType = "recent-playlist-grid") {
+                RecentPlaylistGrid(
+                    playlists = recentPlaylists,
+                    selected = { playlist ->
+                        if (selectionMode) "p${playlist.playlist.id}" in selectedKeys else null
+                    },
+                    onClick = { playlist ->
+                        if (selectionMode) toggleSelection("p${playlist.playlist.id}")
+                        else onOpenPlaylist(playlist.playlist.id)
+                    },
+                    onLongClick = { playlist -> beginSelection("p${playlist.playlist.id}") },
+                    modifier = Modifier.padding(top = Dimens.paddingSmall)
+                )
+            }
         }
 
         if (selectionMode) {
@@ -834,85 +870,113 @@ private fun HomePlaylistCard(
 @Composable
 private fun HomeHero(
     greeting: String,
-    displayName: String,
-    trackCount: Int,
-    mixCount: Int,
-    onClick: (() -> Unit)?
+    onOpenSettings: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Dimens.paddingLarge)
-            .clip(RoundedCornerShape(24.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        SurfaceElevated,
-                        SurfaceDark,
-                        Color(0xFF102B1C)
-                    )
-                )
+            .padding(horizontal = Dimens.paddingLarge),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Good $greeting",
+            style = MaterialTheme.typography.titleLarge,
+            color = PrimaryText,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f)
+        )
+        IconButton(onClick = onOpenSettings) {
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = "Settings",
+                tint = PrimaryText,
+                modifier = Modifier.size(Dimens.iconSize)
             )
-            .border(
-                width = 1.dp,
-                color = AccentGreen.copy(alpha = 0.2f),
-                shape = RoundedCornerShape(24.dp)
-            )
-            .padding(Dimens.paddingLarge)
-            .then(
-                if (onClick != null) {
-                    Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onClick
+        }
+    }
+}
+
+@Composable
+private fun RecentPlaylistGrid(
+    playlists: List<PlaylistWithTracks>,
+    selected: (PlaylistWithTracks) -> Boolean?,
+    onClick: (PlaylistWithTracks) -> Unit,
+    onLongClick: (PlaylistWithTracks) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.paddingLarge),
+        verticalArrangement = Arrangement.spacedBy(Dimens.paddingSmall)
+    ) {
+        playlists.chunked(2).forEach { rowPlaylists ->
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.paddingSmall)) {
+                rowPlaylists.forEach { playlist ->
+                    RecentPlaylistTile(
+                        playlist = playlist,
+                        selected = selected(playlist),
+                        onClick = { onClick(playlist) },
+                        onLongClick = { onLongClick(playlist) },
+                        modifier = Modifier.weight(1f)
                     )
-                } else {
-                    Modifier
                 }
+                if (rowPlaylists.size == 1) Spacer(modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+private fun RecentPlaylistTile(
+    playlist: PlaylistWithTracks,
+    selected: Boolean?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .height(56.dp)
+            .clip(RoundedCornerShape(Dimens.cornerSmall))
+            .background(SurfaceDark)
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+                onLongClick = onLongClick
             ),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(
+        ArtworkCollage(
+            tracks = playlist.tracks,
+            modifier = Modifier.size(56.dp),
+            placeholderIconSize = 14.dp,
+            decodeSizePx = 192
+        )
+        Text(
+            text = playlist.playlist.name,
+            style = MaterialTheme.typography.labelLarge,
+            color = PrimaryText,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .weight(1f)
-                .widthIn(max = 280.dp)
-        ) {
-            Text(
-                text = "Good $greeting,",
-                style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen
-            )
-            Text(
-                text = displayName,
-                style = MaterialTheme.typography.headlineMedium,
-                color = PrimaryText,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-            Text(
-                text = if (trackCount == 0) {
-                    "Your next favorite is waiting."
+                .padding(horizontal = Dimens.paddingSmall)
+        )
+        if (selected != null) {
+            Icon(
+                imageVector = if (selected) {
+                    Icons.Filled.CheckCircle
                 } else {
-                    "Your next favorite is waiting in the mix."
+                    Icons.Filled.RadioButtonUnchecked
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = SecondaryText,
-                modifier = Modifier.padding(top = Dimens.paddingSmall)
-            )
-        }
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(start = Dimens.paddingMedium)
-        ) {
-            Text(
-                text = mixCount.toString(),
-                style = MaterialTheme.typography.headlineLarge,
-                color = AccentGreen,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "TRACK MIX",
-                style = MaterialTheme.typography.labelSmall,
-                color = SecondaryText
+                contentDescription = if (selected) "Selected" else "Not selected",
+                tint = if (selected) AccentGreen else SecondaryText,
+                modifier = Modifier
+                    .size(Dimens.iconSizeSmall)
+                    .padding(end = 2.dp)
             )
         }
     }

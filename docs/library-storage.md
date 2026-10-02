@@ -32,6 +32,14 @@ inserts; inspect effects on relationships when changing insertion behavior.
 
 Favorites live on `Track.isFavorite`. Favorites is a reserved virtual projection,
 not an ordinary persisted membership owner. All Music is also virtual.
+Real playlists store `lastPlayedAt` beside their aggregate `playCount`. The
+timestamp advances from the library playback callback when a non-transient
+track with that playlist's `PlaybackSource` becomes current; opening a playlist
+does not count as listening. Home orders these timestamps newest first and
+shows at most six playlists, followed by legacy playlist IDs from saved recent
+track history when their timestamps are still zero. Existing rows migrate with
+`lastPlayedAt = 0`; older playlists absent from saved track history cannot be
+ordered from the aggregate play count.
 Use `sortOrder`/ordered membership queries; a Room relation does not promise
 order. [PlaylistDetailScreen](../app/src/main/java/com/luno/mobile/ui/library/PlaylistDetailScreen.kt)
 uses `sortedByPlaylistMembership` in

@@ -490,6 +490,8 @@ fun FullPlayerScreen(
                             "Saved ${recommendation.title} to ${playlist.name}"
                         is RecommendationSaveOutcome.AddedToPlaylist ->
                             "Added ${recommendation.title} to ${playlist.name}"
+                        is RecommendationSaveOutcome.AlreadyInPlaylist ->
+                            "${recommendation.title} is already in ${playlist.name}"
                         is RecommendationSaveOutcome.Queued ->
                             "Download queued for ${playlist.name}"
                     }

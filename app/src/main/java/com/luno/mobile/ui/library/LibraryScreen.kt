@@ -53,6 +53,8 @@ import com.luno.mobile.ui.components.BulkSelectionToolbar
 import com.luno.mobile.ui.components.TrackActionsSheet
 import com.luno.mobile.ui.components.TrackRowCard
 import com.luno.mobile.ui.components.TrackSortMode
+import com.luno.mobile.ui.components.playlistAddMessage
+import com.luno.mobile.ui.components.playlistCreatedMessage
 import com.luno.mobile.ui.components.sortedByMode
 import com.luno.mobile.ui.components.sortedPlaylistsByMode
 import com.luno.mobile.ui.theme.AccentGreen
@@ -223,8 +225,8 @@ fun LibraryScreen(
 
     fun addSelectionToPlaylist(target: com.luno.mobile.data.db.entity.Playlist, trackUris: List<String>) {
         scope.launch {
-            app.playlistRepository.addTracksToPlaylist(target.id, trackUris)
-            Toast.makeText(context, "Added to ${target.name}", Toast.LENGTH_SHORT).show()
+            val summary = app.playlistRepository.addTracksToPlaylist(target.id, trackUris)
+            Toast.makeText(context, playlistAddMessage(target.name, summary), Toast.LENGTH_SHORT).show()
         }
         exitSelection()
     }
@@ -232,8 +234,12 @@ fun LibraryScreen(
     fun createPlaylistFromSelection(name: String, description: String, trackUris: List<String>) {
         scope.launch {
             app.playlistRepository.createPlaylist(name, description).onSuccess { playlist ->
-                app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
-                Toast.makeText(context, "Created ${playlist.name}", Toast.LENGTH_SHORT).show()
+                val summary = app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
+                Toast.makeText(
+                    context,
+                    playlistCreatedMessage(playlist.name, summary),
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
         exitSelection()

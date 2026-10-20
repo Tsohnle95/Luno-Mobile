@@ -42,13 +42,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.luno.mobile.LunoApp
 import com.luno.mobile.data.db.entity.Track
+import com.luno.mobile.data.repository.PlaylistAddOutcome
 import com.luno.mobile.ui.theme.AccentGreen
 import com.luno.mobile.ui.theme.Dimens
 import com.luno.mobile.ui.theme.PrimaryText
 import com.luno.mobile.ui.theme.SecondaryText
 import com.luno.mobile.ui.theme.SurfaceDark
 import com.luno.mobile.ui.theme.SurfaceElevated
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Long-press action sheet for a track: "Add to playlist" (nested playlist
@@ -101,40 +104,61 @@ fun TrackActionsSheet(
             trackTitle = track.title,
             onDismiss = { showNewPlaylistDialog = false },
             onCreate = { name, description ->
-                scope.launch {
-                    app.playlistRepository.createPlaylist(name, description)
-                        .onSuccess { playlist ->
-                            app.playlistRepository.addTrackToPlaylist(
+                showNewPlaylistDialog = false
+                onDismiss()
+                // The sheet leaves composition immediately; its remembered
+                // scope would cancel the write. Mutations that outlive the
+                // sheet belong to the application scope.
+                app.appScope.launch {
+                    val result = app.playlistRepository.createPlaylist(name, description)
+                        .mapCatching { playlist ->
+                            playlist to app.playlistRepository.addTrackToPlaylist(
                                 playlistId = playlist.id,
                                 trackUri = track.uri
                             )
-                            Toast.makeText(
-                                context,
-                                "Created \"${playlist.name}\"",
-                                Toast.LENGTH_SHORT
-                            ).show()
                         }
+                    val message = result.fold(
+                        onSuccess = { (playlist, outcome) ->
+                            if (outcome == PlaylistAddOutcome.ADDED) {
+                                "Created \"${playlist.name}\" and added ${track.title}"
+                            } else {
+                                "Created \"${playlist.name}\"; ${track.title} was already there"
+                            }
+                        },
+                        onFailure = { error ->
+                            "Could not create playlist: ${error.message ?: "Try again"}"
+                        }
+                    )
+                    withContext(Dispatchers.Main.immediate) {
+                        Toast.makeText(context.applicationContext, message, Toast.LENGTH_SHORT).show()
+                    }
                 }
-                showNewPlaylistDialog = false
-                onDismiss()
             }
         )
     } else if (showPlaylistPicker) {
         PlaylistPickerSheet(
+            trackUri = track.uri,
             onPick = { playlist ->
-                scope.launch {
-                    app.playlistRepository.addTrackToPlaylist(
-                        playlistId = playlist.id,
-                        trackUri = track.uri
-                    )
-                }
-                Toast.makeText(
-                    context,
-                    "Added to ${playlist.name}",
-                    Toast.LENGTH_SHORT
-                ).show()
                 showPlaylistPicker = false
                 onDismiss()
+                app.appScope.launch {
+                    val message = try {
+                        when (app.playlistRepository.addTrackToPlaylist(
+                            playlistId = playlist.id,
+                            trackUri = track.uri
+                        )) {
+                            PlaylistAddOutcome.ADDED ->
+                                "Added ${track.title} to ${playlist.name}"
+                            PlaylistAddOutcome.ALREADY_PRESENT ->
+                                "${track.title} is already in ${playlist.name}"
+                        }
+                    } catch (error: Exception) {
+                        "Could not add ${track.title}: ${error.message ?: "Try again"}"
+                    }
+                    withContext(Dispatchers.Main.immediate) {
+                        Toast.makeText(context.applicationContext, message, Toast.LENGTH_SHORT).show()
+                    }
+                }
             },
             onDismiss = { showPlaylistPicker = false },
             onCreateNew = {
@@ -152,12 +176,12 @@ fun TrackActionsSheet(
             text = { Text("\"${track.title}\" will be removed from your library and all playlists. The audio file stays on your phone.") },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch {
-                        app.libraryRepository.deleteTrack(track.uri)
-                    }
                     showDeleteConfirm = false
                     onDeleted()
                     onDismiss()
+                    app.appScope.launch {
+                        app.libraryRepository.deleteTrack(track.uri)
+                    }
                 }) {
                     Text("Remove", color = AccentGreen)
                 }
@@ -196,15 +220,18 @@ fun TrackActionsSheet(
                     icon = if (track.isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                     label = if (track.isFavorite) "Remove from favorites" else "Add to favorites",
                     onClick = {
-                        scope.launch {
-                            app.libraryRepository.setFavorite(track.uri, !track.isFavorite)
-                        }
-                        Toast.makeText(
-                            context,
-                            if (track.isFavorite) "Removed from favorites" else "Added to favorites",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        val makeFavorite = !track.isFavorite
                         onDismiss()
+                        app.appScope.launch {
+                            app.libraryRepository.setFavorite(track.uri, makeFavorite)
+                            withContext(Dispatchers.Main.immediate) {
+                                Toast.makeText(
+                                    context.applicationContext,
+                                    if (makeFavorite) "Added to favorites" else "Removed from favorites",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                     }
                 )
                 TrackActionRow(

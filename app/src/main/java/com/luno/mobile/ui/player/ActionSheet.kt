@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.luno.mobile.LunoApp
+import com.luno.mobile.data.repository.PlaylistAddOutcome
 import com.luno.mobile.playback.MediaTrack
 import com.luno.mobile.playback.MusicController
 import com.luno.mobile.playback.RecommendationSaveOutcome
@@ -93,7 +94,14 @@ fun PlayerActionSheet(
                 app.recommendationPreviewManager.saveCurrentToPlaylist(playlistId, targetUri)
             } else {
                 app.playlistRepository.addMediaTrackToPlaylist(playlistId, targetTrack)
-                    .map { RecommendationSaveOutcome.AddedToPlaylist(targetUri) }
+                    .map { outcome ->
+                        when (outcome) {
+                            PlaylistAddOutcome.ADDED ->
+                                RecommendationSaveOutcome.AddedToPlaylist(targetUri)
+                            PlaylistAddOutcome.ALREADY_PRESENT ->
+                                RecommendationSaveOutcome.AlreadyInPlaylist(targetUri)
+                        }
+                    }
             }
             withContext(Dispatchers.Main.immediate) {
                 Toast.makeText(
@@ -107,6 +115,8 @@ fun PlayerActionSheet(
                                 is RecommendationSaveOutcome.Saved,
                                 is RecommendationSaveOutcome.AddedToPlaylist ->
                                     "Added $targetTitle to $playlistName"
+                                is RecommendationSaveOutcome.AlreadyInPlaylist ->
+                                    "$targetTitle is already in $playlistName"
                             }
                         },
                         onFailure = {
@@ -158,6 +168,7 @@ fun PlayerActionSheet(
         )
     } else if (showPlaylistPicker) {
         PlaylistPickerSheet(
+            trackUri = playlistTargetUri,
             onPick = { playlist ->
                 showPlaylistPicker = false
                 addCurrentTrackToPlaylist(playlist.id, playlist.name)

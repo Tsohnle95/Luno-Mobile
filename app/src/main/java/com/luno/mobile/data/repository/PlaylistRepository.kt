@@ -8,6 +8,7 @@ import com.luno.mobile.data.db.entity.PlaylistTrack
 import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.playback.MediaTrack
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import java.io.File
 
 class PlaylistRepository(
@@ -43,7 +44,7 @@ class PlaylistRepository(
 
     suspend fun deletePlaylist(id: Long) = playlistDao.deletePlaylistById(id)
 
-    suspend fun addTrackToPlaylist(playlistId: Long, trackUri: String) {
+    suspend fun addTrackToPlaylist(playlistId: Long, trackUri: String): PlaylistAddOutcome {
         require(playlistId > 0L) { "Playlist does not exist" }
         require(playlistDao.getPlaylist(playlistId) != null) {
             "The selected playlist no longer exists"
@@ -51,15 +52,26 @@ class PlaylistRepository(
         require(trackUri.isNotBlank() && trackDao.exists(trackUri)) {
             "This song is not in the library yet"
         }
+        // Keep sortOrder monotonic even when the membership already exists:
+        // querying MAX first also makes the duplicate path read-only.
+        if (playlistDao.isTrackInPlaylist(playlistId, trackUri)) {
+            return PlaylistAddOutcome.ALREADY_PRESENT
+        }
         val maxOrder = playlistDao.maxSortOrder(playlistId) ?: -1
-        playlistDao.addTrackToPlaylist(
+        val rowId = playlistDao.addTrackToPlaylist(
             PlaylistTrack(
                 playlistId = playlistId,
                 trackUri = trackUri,
                 sortOrder = maxOrder + 1
             )
         )
+        // A concurrent add (for example playlist sync) can win between the
+        // existence check and the insert; IGNORE reports that as no row.
+        return if (rowId >= 0L) PlaylistAddOutcome.ADDED else PlaylistAddOutcome.ALREADY_PRESENT
     }
+
+    fun observePlaylistIdsForTrack(trackUri: String): Flow<Set<Long>> =
+        playlistDao.observePlaylistIdsForTrack(trackUri).map { it.toSet() }
 
     /**
      * Adds the item currently represented by the player. Normal library
@@ -68,7 +80,10 @@ class PlaylistRepository(
      * insert cannot fail its Track foreign key and the song is searchable in
      * the destination playlist immediately.
      */
-    suspend fun addMediaTrackToPlaylist(playlistId: Long, track: MediaTrack): Result<Unit> =
+    suspend fun addMediaTrackToPlaylist(
+        playlistId: Long,
+        track: MediaTrack
+    ): Result<PlaylistAddOutcome> =
         runCatching {
             require(playlistId > 0L) { "Playlist does not exist" }
             require(playlistDao.getPlaylist(playlistId) != null) {
@@ -94,12 +109,21 @@ class PlaylistRepository(
             addTrackToPlaylist(playlistId, track.uri)
         }
 
-    /** Adds a batch in one Room transaction and ignores duplicate membership. */
-    suspend fun addTracksToPlaylist(playlistId: Long, trackUris: Collection<String>) {
+    /**
+     * Adds a batch in one Room transaction and reports how many entries were
+     * new. Duplicate/legacy memberships are ignored atomically by the DAO so
+     * the UI can tell the user what actually changed instead of always
+     * claiming success.
+     */
+    suspend fun addTracksToPlaylist(
+        playlistId: Long,
+        trackUris: Collection<String>
+    ): PlaylistAddSummary {
+        require(playlistId > 0L) { "Playlist does not exist" }
         val distinctUris = trackUris.distinct()
-        if (distinctUris.isEmpty()) return
+        if (distinctUris.isEmpty()) return PlaylistAddSummary()
         val firstOrder = (playlistDao.maxSortOrder(playlistId) ?: -1) + 1
-        playlistDao.addTracksToPlaylist(
+        val rowIds = playlistDao.addTracksToPlaylist(
             distinctUris.mapIndexed { index, uri ->
                 PlaylistTrack(
                     playlistId = playlistId,
@@ -107,6 +131,11 @@ class PlaylistRepository(
                     sortOrder = firstOrder + index
                 )
             }
+        )
+        val added = rowIds.count { it >= 0L }
+        return PlaylistAddSummary(
+            added = added,
+            alreadyPresent = distinctUris.size - added
         )
     }
 
@@ -124,3 +153,15 @@ class PlaylistRepository(
 
     suspend fun getPlaylistWithTracks(id: Long) = playlistDao.getPlaylistWithTracks(id)
 }
+
+/** Result of adding one song to a playlist. */
+enum class PlaylistAddOutcome {
+    ADDED,
+    ALREADY_PRESENT
+}
+
+/** Result of adding a batch, used to report real changes in the UI. */
+data class PlaylistAddSummary(
+    val added: Int = 0,
+    val alreadyPresent: Int = 0
+)

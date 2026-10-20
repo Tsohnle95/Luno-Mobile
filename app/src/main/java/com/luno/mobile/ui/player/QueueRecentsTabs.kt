@@ -52,6 +52,8 @@ import com.luno.mobile.playback.PlaybackSource
 import com.luno.mobile.LunoApp
 import com.luno.mobile.ui.components.BulkSelectionToolbar
 import com.luno.mobile.ui.components.RecommendationArtworkImage
+import com.luno.mobile.ui.components.playlistAddMessage
+import com.luno.mobile.ui.components.playlistCreatedMessage
 import com.luno.mobile.ui.theme.AccentGreen
 import com.luno.mobile.ui.theme.Dimens
 import com.luno.mobile.ui.theme.PrimaryText
@@ -231,16 +233,24 @@ fun RecentlyPlayedTab(
                 onDismiss = ::exitSelection,
                 onAddToPlaylist = { playlist, trackUris ->
                     scope.launch {
-                        app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
-                        Toast.makeText(context, "Added to ${playlist.name}", Toast.LENGTH_SHORT).show()
+                        val summary = app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
+                        Toast.makeText(
+                            context,
+                            playlistAddMessage(playlist.name, summary),
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                     exitSelection()
                 },
                 onCreatePlaylist = { name, description, trackUris ->
                     scope.launch {
                         app.playlistRepository.createPlaylist(name, description).onSuccess { playlist ->
-                            app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
-                            Toast.makeText(context, "Created ${playlist.name}", Toast.LENGTH_SHORT).show()
+                            val summary = app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
+                            Toast.makeText(
+                                context,
+                                playlistCreatedMessage(playlist.name, summary),
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
                     exitSelection()

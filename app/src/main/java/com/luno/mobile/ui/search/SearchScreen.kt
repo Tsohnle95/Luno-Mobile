@@ -85,6 +85,8 @@ import com.luno.mobile.ui.components.PlaylistPickerSheet
 import com.luno.mobile.ui.components.RecommendationArtworkImage
 import com.luno.mobile.ui.components.TrackActionsSheet
 import com.luno.mobile.ui.components.TrackRowCard
+import com.luno.mobile.ui.components.playlistAddMessage
+import com.luno.mobile.ui.components.playlistCreatedMessage
 import com.luno.mobile.ui.create.CreatePlaylistSheet
 import com.luno.mobile.ui.theme.AccentGreen
 import com.luno.mobile.ui.theme.Dimens
@@ -605,8 +607,12 @@ fun SearchScreen(
                     },
                     onAddToPlaylist = { playlist, trackUris ->
                         scope.launch {
-                            app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
-                            Toast.makeText(context, "Added to ${playlist.name}", Toast.LENGTH_SHORT).show()
+                            val summary = app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
+                            Toast.makeText(
+                                context,
+                                playlistAddMessage(playlist.name, summary),
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                         downloadedSelectionMode = false
                         selectedDownloadedUris = emptySet()
@@ -614,8 +620,12 @@ fun SearchScreen(
                     onCreatePlaylist = { name, description, trackUris ->
                         scope.launch {
                             app.playlistRepository.createPlaylist(name, description).onSuccess { playlist ->
-                                app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
-                                Toast.makeText(context, "Created ${playlist.name}", Toast.LENGTH_SHORT).show()
+                                val summary = app.playlistRepository.addTracksToPlaylist(playlist.id, trackUris)
+                                Toast.makeText(
+                                    context,
+                                    playlistCreatedMessage(playlist.name, summary),
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
                         }
                         downloadedSelectionMode = false
@@ -680,19 +690,17 @@ fun SearchScreen(
 
     playlistTracksToAdd?.let { tracks ->
         PlaylistPickerSheet(
+            trackUri = tracks.singleOrNull()?.uri,
             onPick = { playlist ->
                 playlistTracksToAdd = null
                 scope.launch {
-                    tracks.forEach { track ->
-                        app.playlistRepository.addTrackToPlaylist(playlist.id, track.uri)
-                    }
+                    val summary = app.playlistRepository.addTracksToPlaylist(
+                        playlist.id,
+                        tracks.map { it.uri }
+                    )
                     Toast.makeText(
                         context,
-                        if (tracks.size == 1) {
-                            "Added to ${playlist.name}"
-                        } else {
-                            "Added ${tracks.size} songs to ${playlist.name}"
-                        },
+                        playlistAddMessage(playlist.name, summary),
                         Toast.LENGTH_SHORT
                     ).show()
                 }

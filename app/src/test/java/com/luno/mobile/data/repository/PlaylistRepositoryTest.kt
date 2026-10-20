@@ -107,15 +107,54 @@ class PlaylistRepositoryTest {
         database.trackDao().insertTracks(tracks)
         val playlist = repository.createPlaylist("Batch").getOrThrow()
 
-        repository.addTracksToPlaylist(
+        val first = repository.addTracksToPlaylist(
             playlist.id,
             listOf("content://test/1", "content://test/2", "content://test/1")
         )
-        repository.addTracksToPlaylist(playlist.id, listOf("content://test/2", "content://test/3"))
+        val second = repository.addTracksToPlaylist(
+            playlist.id,
+            listOf("content://test/2", "content://test/3")
+        )
 
+        assertThat(first).isEqualTo(PlaylistAddSummary(added = 2, alreadyPresent = 0))
+        assertThat(second).isEqualTo(PlaylistAddSummary(added = 1, alreadyPresent = 1))
         assertThat(repository.getPlaylistWithTracks(playlist.id)!!.tracks.map { it.uri })
             .containsExactly("content://test/1", "content://test/2", "content://test/3")
             .inOrder()
+    }
+
+    @Test
+    fun addTrackToPlaylist_reportsAlreadyPresentWithoutAddingAgain(): Unit = runBlocking {
+        val playlist = repository.createPlaylist("Reggae").getOrThrow()
+        val track = com.luno.mobile.data.db.entity.Track(
+            uri = "content://test/reggae-1",
+            title = "Reggae Song"
+        )
+        database.trackDao().insertTrack(track)
+
+        assertThat(repository.addTrackToPlaylist(playlist.id, track.uri))
+            .isEqualTo(PlaylistAddOutcome.ADDED)
+        assertThat(repository.addTrackToPlaylist(playlist.id, track.uri))
+            .isEqualTo(PlaylistAddOutcome.ALREADY_PRESENT)
+        assertThat(repository.getPlaylistWithTracks(playlist.id)!!.tracks).hasSize(1)
+        assertThat(repository.observePlaylistIdsForTrack(track.uri).first())
+            .containsExactly(playlist.id)
+    }
+
+    @Test
+    fun addMediaTrackToPlaylist_reportsDuplicateOutcome(): Unit = runBlocking {
+        val playlist = repository.createPlaylist("Reggae").getOrThrow()
+        val playerTrack = MediaTrack(
+            uri = "content://test/reggae-2",
+            title = "One Love",
+            artist = "Bob Marley"
+        )
+
+        assertThat(repository.addMediaTrackToPlaylist(playlist.id, playerTrack).getOrThrow())
+            .isEqualTo(PlaylistAddOutcome.ADDED)
+        assertThat(repository.addMediaTrackToPlaylist(playlist.id, playerTrack).getOrThrow())
+            .isEqualTo(PlaylistAddOutcome.ALREADY_PRESENT)
+        assertThat(repository.getPlaylistWithTracks(playlist.id)!!.tracks).hasSize(1)
     }
 
     @Test

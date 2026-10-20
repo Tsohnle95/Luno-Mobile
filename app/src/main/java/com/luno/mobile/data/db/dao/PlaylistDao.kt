@@ -71,10 +71,16 @@ interface PlaylistDao {
     fun getAllPlaylistsWithTracks(): Flow<List<PlaylistWithTracks>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun addTrackToPlaylist(playlistTrack: PlaylistTrack)
+    suspend fun addTrackToPlaylist(playlistTrack: PlaylistTrack): Long
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun addTracksToPlaylist(playlistTracks: List<PlaylistTrack>)
+    suspend fun addTracksToPlaylist(playlistTracks: List<PlaylistTrack>): List<Long>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlistId = :playlistId AND trackUri = :trackUri)")
+    suspend fun isTrackInPlaylist(playlistId: Long, trackUri: String): Boolean
+
+    @Query("SELECT playlistId FROM playlist_tracks WHERE trackUri = :trackUri")
+    fun observePlaylistIdsForTrack(trackUri: String): Flow<List<Long>>
 
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackUri = :trackUri")
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackUri: String)

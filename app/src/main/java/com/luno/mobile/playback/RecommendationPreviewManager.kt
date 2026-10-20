@@ -10,6 +10,7 @@ import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.data.discovery.LastfmTrack
 import com.luno.mobile.data.discovery.normalizedRecommendationKey
 import com.luno.mobile.data.repository.DownloadRepository
+import com.luno.mobile.data.repository.PlaylistAddOutcome
 import com.luno.mobile.data.repository.PlaylistRepository
 import java.io.File
 import java.io.FileOutputStream
@@ -66,6 +67,7 @@ data class RecommendationPreviewState(
 sealed interface RecommendationSaveOutcome {
     data class Saved(val track: Track) : RecommendationSaveOutcome
     data class AddedToPlaylist(val trackUri: String) : RecommendationSaveOutcome
+    data class AlreadyInPlaylist(val trackUri: String) : RecommendationSaveOutcome
     data class Queued(val jobId: Long) : RecommendationSaveOutcome
 }
 
@@ -1530,9 +1532,14 @@ class RecommendationPreviewManager(
         return try {
             val savedUri = synchronized(lock) { savedTrackUris[key] }
             if (savedUri != null) {
-                playlistRepository.addTrackToPlaylist(playlistId, savedUri)
+                val outcome = when (playlistRepository.addTrackToPlaylist(playlistId, savedUri)) {
+                    PlaylistAddOutcome.ADDED ->
+                        RecommendationSaveOutcome.AddedToPlaylist(savedUri)
+                    PlaylistAddOutcome.ALREADY_PRESENT ->
+                        RecommendationSaveOutcome.AlreadyInPlaylist(savedUri)
+                }
                 finishImmediateSave(key)
-                return Result.success(RecommendationSaveOutcome.AddedToPlaylist(savedUri))
+                return Result.success(outcome)
             }
 
             val asset = synchronized(lock) { assetsByKey[key] }

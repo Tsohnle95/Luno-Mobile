@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -45,12 +47,14 @@ import com.luno.mobile.ui.theme.PrimaryText
 import com.luno.mobile.ui.theme.SecondaryText
 import com.luno.mobile.ui.theme.SurfaceDark
 import com.luno.mobile.ui.theme.SurfaceElevated
+import kotlinx.coroutines.flow.flowOf
 
 /** Bottom sheet listing all playlists; [onPick] is called with the choice. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistPickerSheet(
     title: String = "Add to playlist",
+    trackUri: String? = null,
     onPick: (Playlist) -> Unit,
     onDismiss: () -> Unit,
     onCreateNew: (() -> Unit)? = null,
@@ -59,6 +63,10 @@ fun PlaylistPickerSheet(
     val app = LocalContext.current.applicationContext as LunoApp
     val playlists by app.playlistRepository.getAllPlaylists().collectAsState(initial = emptyList())
     val recentlySavedIds by app.recentlySavedPlaylistIds.collectAsState()
+    val playlistIdsWithTrack by remember(trackUri) {
+        if (trackUri.isNullOrBlank()) flowOf(emptySet<Long>())
+        else app.playlistRepository.observePlaylistIdsForTrack(trackUri)
+    }.collectAsState(initial = emptySet())
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val filteredPlaylists = playlists.filter { playlist ->
         playlist.name.contains(searchQuery.trim(), ignoreCase = true)
@@ -189,7 +197,11 @@ fun PlaylistPickerSheet(
                             items = recentlySavedPlaylists,
                             key = { "recent-${it.id}" }
                         ) { playlist ->
-                            PlaylistPickerRow(playlist = playlist, onPick = onPick)
+                            PlaylistPickerRow(
+                                playlist = playlist,
+                                alreadyContainsTrack = playlist.id in playlistIdsWithTrack,
+                                onPick = onPick
+                            )
                         }
                         if (remainingPlaylists.isNotEmpty()) {
                             item(key = "all-playlists-heading") {
@@ -205,7 +217,11 @@ fun PlaylistPickerSheet(
                         },
                         key = { "playlist-${it.id}" }
                     ) { playlist ->
-                        PlaylistPickerRow(playlist = playlist, onPick = onPick)
+                        PlaylistPickerRow(
+                            playlist = playlist,
+                            alreadyContainsTrack = playlist.id in playlistIdsWithTrack,
+                            onPick = onPick
+                        )
                     }
                 }
             }
@@ -232,6 +248,7 @@ private fun PlaylistPickerSectionHeading(text: String) {
 @Composable
 private fun PlaylistPickerRow(
     playlist: Playlist,
+    alreadyContainsTrack: Boolean,
     onPick: (Playlist) -> Unit
 ) {
     Row(
@@ -243,16 +260,33 @@ private fun PlaylistPickerRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
-            contentDescription = null,
-            tint = PrimaryText,
+            imageVector = if (alreadyContainsTrack) {
+                Icons.Filled.CheckCircle
+            } else {
+                Icons.AutoMirrored.Filled.PlaylistAdd
+            },
+            contentDescription = if (alreadyContainsTrack) {
+                "Song already in this playlist"
+            } else {
+                null
+            },
+            tint = if (alreadyContainsTrack) AccentGreen else PrimaryText,
             modifier = Modifier.size(Dimens.iconSize)
         )
         Spacer(modifier = Modifier.width(Dimens.paddingLarge))
-        Text(
-            text = playlist.name,
-            style = MaterialTheme.typography.bodyLarge,
-            color = PrimaryText
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = playlist.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = PrimaryText
+            )
+            if (alreadyContainsTrack) {
+                Text(
+                    text = "Already in this playlist",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SecondaryText
+                )
+            }
+        }
     }
 }

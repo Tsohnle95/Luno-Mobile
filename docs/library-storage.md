@@ -29,6 +29,14 @@ database shape/version; retain explicit migrations and every historic snapshot.
 Tracks are keyed by playable URI; membership uses playlist ID + track URI with
 cascading foreign keys. REPLACE track inserts differ from IGNORE membership
 inserts; inspect effects on relationships when changing insertion behavior.
+Playlist membership adds are duplicate-aware: `PlaylistRepository` returns
+`ADDED`/`ALREADY_PRESENT` for one song and an added/already-present summary for
+batches, while the DAO still inserts with IGNORE for atomic concurrency safety.
+UI success text must come from that outcome, never from the tap itself, and
+`PlaylistPickerSheet` marks playlists that already contain the selected song.
+Sheet mutations that must outlive dismissal (playlist/favorite/delete actions)
+run in `LunoApp.appScope`; a `rememberCoroutineScope` tied to a sheet is
+cancelled as soon as the sheet leaves composition.
 
 Favorites live on `Track.isFavorite`. Favorites is a reserved virtual projection,
 not an ordinary persisted membership owner. All Music is also virtual.
@@ -121,6 +129,7 @@ Rendering is in `ui/components/ArtworkImage.kt`, `ArtworkCollage.kt` and
 - [LibraryRepositoryTest](../app/src/test/java/com/luno/mobile/data/repository/LibraryRepositoryTest.kt),
   [MusicFolderRepositoryTest](../app/src/test/java/com/luno/mobile/data/repository/MusicFolderRepositoryTest.kt),
   [PlaylistRepositoryTest](../app/src/test/java/com/luno/mobile/data/repository/PlaylistRepositoryTest.kt),
+  [PlaylistAddMessageTest](../app/src/test/java/com/luno/mobile/ui/components/PlaylistAddMessageTest.kt),
   [DuplicateFinderTest](../app/src/test/java/com/luno/mobile/data/repository/DuplicateFinderTest.kt).
 - [TrackDaoTest](../app/src/test/java/com/luno/mobile/data/db/TrackDaoTest.kt),
   [PlaylistDaoTest](../app/src/test/java/com/luno/mobile/data/db/PlaylistDaoTest.kt).

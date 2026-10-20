@@ -79,6 +79,12 @@ only ranges eligible `googlevideo.com` hosts. It bounds concurrency, verifies
 and verifies final bytes. Rejection/cancellation cleans chunks/target and allows
 ordinary-stream fallback; cancellation cancels blocked calls. Keep validation
 at this transport boundary rather than trusting a CDN response by hostname.
+The size floor must stay far below ordinary song length: YouTube throttles a
+single un-ranged media connection to a small fraction of full speed, so gating
+ranges on multi-megabyte files silently sends typical three-minute songs down
+the slow path. A 2026 measurement of a 3.45 MB song showed ~32 KB/s on the
+single stream versus multi-MB/s on validated ranges; the regression test uses
+that payload size against production defaults.
 
 ## Evidence and gaps
 
@@ -86,7 +92,8 @@ at this transport boundary rather than trusting a CDN response by hostname.
 covers orphan reconciliation, URL rejection, destination/thumbnail durability,
 Unsorted repair, unique preview paths and promotion rollback.
 [ParallelRangeDownloaderTest](../app/src/test/java/com/luno/mobile/playback/ParallelRangeDownloaderTest.kt)
-covers assembly, unsupported/malformed ranges, clean fallback and cancellation.
+covers assembly, unsupported/malformed ranges, clean fallback, cancellation and
+the typical-song size path that must select ranges.
 [DownloadJobDaoTest](../app/src/test/java/com/luno/mobile/data/db/DownloadJobDaoTest.kt)
 is DAO evidence. There are no dedicated DownloadWorker/PlaylistSyncWorker tests
 or live extractor checks. Worker foreground/retry/process-death behavior,

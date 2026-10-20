@@ -104,6 +104,39 @@ class ParallelRangeDownloaderTest {
     }
 
     @Test
+    fun typicalThreeMinuteSongUsesRangedTransferInsteadOfThrottledStream() = withServer { server, root ->
+        // 3:33 of 128 kbps AAC, the size that previously fell below the
+        // 4 MiB cutoff and silently used YouTube's throttled single stream.
+        val content = ByteArray(3_449_447) { (it % 251).toByte() }
+        val requestedRanges = CopyOnWriteArrayList<String>()
+        val unrangedRequests = CopyOnWriteArrayList<String>()
+        server.dispatcher = rangeDispatcher(content) { request ->
+            request.getHeader("Range")?.let(requestedRanges::add)
+                ?: unrangedRequests.add(request.path.orEmpty())
+        }
+
+        val target = File(root, "three-minute-song.m4a")
+        val result = ParallelRangeDownloader(
+            client = client,
+            // Keep the production chunk/minimum defaults; only relax the CDN
+            // host check so MockWebServer can stand in for googlevideo.
+            isEligibleHost = { true }
+        ).download(
+            request = request(server),
+            targetFile = target,
+            isStopped = { false },
+            onProgress = { _, _ -> }
+        )
+
+        assertThat(result).isInstanceOf(ParallelRangeDownloader.Outcome.Completed::class.java)
+        assertThat(target.length()).isEqualTo(content.size.toLong())
+        assertThat(target.readBytes()).isEqualTo(content)
+        assertThat(requestedRanges.size).isGreaterThan(1)
+        assertThat(requestedRanges.first()).isEqualTo("bytes=0-524287")
+        assertThat(unrangedRequests).isEmpty()
+    }
+
+    @Test
     fun cancellationRemovesPartialChunksAndTemporaryDirectory() = withServer { server, root ->
         val content = ByteArray(24) { it.toByte() }
         server.dispatcher = object : Dispatcher() {

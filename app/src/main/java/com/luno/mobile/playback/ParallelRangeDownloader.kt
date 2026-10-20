@@ -265,8 +265,15 @@ internal class ParallelRangeDownloader(
     }
 
     companion object {
-        private const val DEFAULT_CHUNK_SIZE_BYTES = 1L * 1024L * 1024L
-        private const val DEFAULT_MINIMUM_SIZE_BYTES = 4L * 1024L * 1024L
+        // YouTube throttles a single un-ranged media connection to a few tens
+        // of KB/s, while individual range requests are served at full speed.
+        // A typical three-minute 128 kbps song is only ~3.4 MiB, so the old
+        // 4 MiB cutoff silently forced almost every song onto the throttled
+        // one-connection path. Keep the cutoff small enough that ordinary
+        // songs always split into several ranges; unsupported servers still
+        // reject the first probe and fall back immediately.
+        private const val DEFAULT_CHUNK_SIZE_BYTES = 512L * 1024L
+        private const val DEFAULT_MINIMUM_SIZE_BYTES = 64L * 1024L
         private const val DEFAULT_PARALLEL_REQUESTS = 4
         private const val MAX_SUPPORTED_SIZE_BYTES = 2L * 1024L * 1024L * 1024L
         private const val COPY_BUFFER_SIZE = 64 * 1024

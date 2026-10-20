@@ -1,6 +1,14 @@
 package com.luno.mobile.playback
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.Player
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaController
+import androidx.media3.session.MediaSession
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -13,6 +21,10 @@ import com.luno.mobile.data.discovery.LastfmTrack
 import com.luno.mobile.data.repository.DownloadRepository
 import com.luno.mobile.data.repository.PlaylistRepository
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CopyOnWriteArraySet
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,10 +33,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
@@ -379,6 +393,7 @@ class RecommendationPreviewManagerTest {
         ).isFalse()
     }
 
+
     @Test
     fun discoverMode_toggleIsProcessState() {
         val manager = RecommendationPreviewManager(
@@ -467,6 +482,562 @@ class RecommendationPreviewManagerTest {
 
         assertThat(manager.state.value.queuedKeys).doesNotContain(key)
         assertThat(manager.state.value.saveFailures).doesNotContainKey(key)
+    }
+
+    @Test
+    fun discoverIsolationRemovesPastPhysicalItemsBeforeRepeatAllCanWrap() = runBlocking {
+        val pastUri = "file:///past-physical.m4a"
+        val seedUri = "file:///repeat-all-seed.m4a"
+        val physicalNextUri = "file:///repeat-all-next.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        player.setMediaItems(listOf(pastUri, seedUri, physicalNextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(1)
+        player.repeatMode = Player.REPEAT_MODE_ALL
+        shadowOf(Looper.getMainLooper()).idle()
+        val musicController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+        val manager = RecommendationPreviewManager(
+            context = context,
+            appScope = appScope,
+            downloadRepository = downloadRepository,
+            playlistRepository = PlaylistRepository(
+                database.playlistDao(),
+                database.trackDao()
+            ),
+            resolver = {
+                delay(30_000)
+                Result.failure(IllegalStateException("Hold preview resolution"))
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            musicController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(musicController.currentTrack.value?.uri).isEqualTo(seedUri)
+            manager.attach(musicController)
+            manager.setDiscoverMode(
+                enabled = true,
+                recommendations = listOf(LastfmTrack("Repeat Artist", "Ready Later", 0.9))
+            )
+            withTimeout(5_000) { manager.state.first { it.active } }
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.mediaItemCount).isEqualTo(1)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(seedUri)
+            assertThat(player.repeatMode).isEqualTo(Player.REPEAT_MODE_ALL)
+
+            manager.setDiscoverMode(enabled = false)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.mediaItemCount).isEqualTo(3)
+            assertThat((0 until player.mediaItemCount).map {
+                player.getMediaItemAt(it).mediaId
+            }).containsExactly(pastUri, seedUri, physicalNextUri).inOrder()
+            assertThat(player.currentMediaItemIndex).isEqualTo(1)
+            assertThat(player.playWhenReady).isFalse()
+            assertThat(player.repeatMode).isEqualTo(Player.REPEAT_MODE_ALL)
+            manager.detach(musicController)
+        } finally {
+            musicController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun deferredQueueRestoreDoesNotAppendOverANewerPlayRequest() = runBlocking {
+        val seedUri = "file:///restore-race-seed.m4a"
+        val physicalNextUri = "file:///restore-race-next.m4a"
+        val userChoiceUri = "file:///restore-race-user-choice.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        player.setMediaItems(listOf(seedUri, physicalNextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        shadowOf(Looper.getMainLooper()).idle()
+        val musicController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+        val fetchStarted = CompletableDeferred<Unit>()
+        val fetchResult = CompletableDeferred<Result<List<LastfmTrack>>>()
+        val manager = RecommendationPreviewManager(
+            context = context,
+            appScope = appScope,
+            downloadRepository = downloadRepository,
+            playlistRepository = PlaylistRepository(
+                database.playlistDao(),
+                database.trackDao()
+            ),
+            discoverRecommendations = {
+                fetchStarted.complete(Unit)
+                fetchResult.await()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            musicController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            manager.attach(musicController)
+            manager.setDiscoverMode(enabled = true)
+            withTimeout(5_000) { fetchStarted.await() }
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.mediaItemCount).isEqualTo(1)
+
+            withContext(Dispatchers.Default) {
+                manager.setDiscoverMode(enabled = false)
+            }
+            musicController.play(
+                listOf(MediaTrack(uri = userChoiceUri, title = "New Choice", artist = "User"))
+            )
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(musicController.playRequestRevision.value).isGreaterThan(0L)
+            assertThat(player.mediaItemCount).isEqualTo(1)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(userChoiceUri)
+        } finally {
+            shadowOf(Looper.getMainLooper()).idle()
+            manager.detach(musicController)
+            musicController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun discoverHandoff_holdsPhysicalQueueUntilFirstPreviewIsReady() {
+        val seedUri = "file:///seed.m4a"
+        val physicalNextUri = "file:///physical-next.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        player.setMediaItems(
+            listOf(seedUri, physicalNextUri).map { uri ->
+                MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+            }
+        )
+        player.seekToDefaultPosition(0)
+        shadowOf(Looper.getMainLooper()).idle()
+        val musicController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            musicController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            val manager = RecommendationPreviewManager(
+                context = context,
+                appScope = appScope,
+                downloadRepository = downloadRepository,
+                playlistRepository = PlaylistRepository(
+                    database.playlistDao(),
+                    database.trackDao()
+                ),
+                resolver = {
+                    delay(30_000)
+                    Result.failure(IllegalStateException("Keep the first preview pending"))
+                }
+            )
+            manager.attach(musicController)
+
+            manager.setDiscoverMode(
+                enabled = true,
+                recommendations = listOf(LastfmTrack("Recommended Artist", "Recommended", 0.9))
+            )
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(seedUri)
+            assertThat(player.mediaItemCount).isEqualTo(1)
+
+            manager.setDiscoverMode(enabled = false)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.mediaItemCount).isEqualTo(2)
+            manager.detach(musicController)
+        } finally {
+            musicController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun discoverHandoff_advancesQueuedPreviewWhenSeedEndsDuringResolution() = runBlocking {
+        val seedUri = "file:///handoff-race-seed.m4a"
+        val physicalNextUri = "file:///handoff-race-next.m4a"
+        val previewUri = "file:///handoff-race-preview.m4a"
+        val recommendation = LastfmTrack("Race Artist", "Race Preview", 0.9)
+        val player = ExoPlayer.Builder(context).build()
+        player.setMediaItems(listOf(seedUri, physicalNextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        player.playWhenReady = true
+        val sessionPlayer = ControlledPlaybackStatePlayer(player, Player.STATE_READY)
+        val session = MediaSession.Builder(context, sessionPlayer).build()
+        val musicController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+        val raceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val previewDownloadReturned = CompletableDeferred<Unit>()
+        val manager = RecommendationPreviewManager(
+            context = context,
+            appScope = raceScope,
+            downloadRepository = downloadRepository,
+            playlistRepository = PlaylistRepository(
+                database.playlistDao(),
+                database.trackDao()
+            ),
+            resolver = {
+                Result.success(
+                    ResolvedRecommendation(
+                        sourceUrl = "https://example.com/race-preview.m4a",
+                        thumbnailUrl = "",
+                        mimeType = "audio/mp4"
+                    )
+                )
+            },
+            previewDownloader = { _, _, _, target ->
+                target.parentFile?.mkdirs()
+                target.writeBytes(byteArrayOf(0))
+                withContext(Dispatchers.Default) {
+                    // Queue the player-end event before the manager's Main-thread
+                    // insertion while its background continuation still sees READY.
+                    Handler(Looper.getMainLooper()).post {
+                        sessionPlayer.transitionTo(Player.STATE_ENDED)
+                    }
+                    previewDownloadReturned.complete(Unit)
+                    Result.success(
+                        MediaTrack(
+                            uri = previewUri,
+                            title = recommendation.title,
+                            artist = recommendation.artist,
+                            isTransient = true
+                        )
+                    )
+                }
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            musicController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(musicController.currentTrack.value?.uri).isEqualTo(seedUri)
+            assertThat(musicController.playWhenReady.value).isTrue()
+            manager.attach(musicController)
+            manager.setDiscoverMode(enabled = true, recommendations = listOf(recommendation))
+
+            withTimeout(5_000) { previewDownloadReturned.await() }
+            withTimeout(5_000) {
+                while (musicController.currentTrack.value?.uri != previewUri) {
+                    shadowOf(Looper.getMainLooper()).idle()
+                    kotlinx.coroutines.yield()
+                    delay(10)
+                }
+            }
+
+            assertThat(musicController.currentTrack.value?.uri).isEqualTo(previewUri)
+            assertThat(musicController.playWhenReady.value).isTrue()
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(previewUri)
+        } finally {
+            manager.detach(musicController)
+            raceScope.cancel()
+            musicController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun discoverOffRestoresEndedPausedQueueWithoutAdvancing() = runBlocking {
+        val seedUri = "file:///paused-discover-seed.m4a"
+        val physicalNextUri = "file:///paused-discover-next.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        player.setMediaItems(listOf(seedUri, physicalNextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        player.playWhenReady = true
+        val sessionPlayer = ControlledPlaybackStatePlayer(player, Player.STATE_READY)
+        val session = MediaSession.Builder(context, sessionPlayer).build()
+        val musicController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+        val resolverStarted = CompletableDeferred<Unit>()
+        val pendingResolver = CompletableDeferred<Result<ResolvedRecommendation>>()
+        val manager = RecommendationPreviewManager(
+            context = context,
+            appScope = appScope,
+            downloadRepository = downloadRepository,
+            playlistRepository = PlaylistRepository(
+                database.playlistDao(),
+                database.trackDao()
+            ),
+            resolver = {
+                resolverStarted.complete(Unit)
+                pendingResolver.await()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            musicController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            manager.attach(musicController)
+            manager.setDiscoverMode(
+                enabled = true,
+                recommendations = listOf(LastfmTrack("Paused Artist", "Paused Preview", 0.9))
+            )
+            withTimeout(5_000) { resolverStarted.await() }
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.mediaItemCount).isEqualTo(1)
+
+            player.playWhenReady = false
+            shadowOf(Looper.getMainLooper()).idle()
+            sessionPlayer.transitionTo(Player.STATE_ENDED)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(musicController.playbackState.value).isEqualTo(Player.STATE_ENDED)
+            assertThat(musicController.playWhenReady.value).isFalse()
+
+            manager.setDiscoverMode(enabled = false)
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat((0 until player.mediaItemCount).map {
+                player.getMediaItemAt(it).mediaId
+            }).containsExactly(seedUri, physicalNextUri).inOrder()
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(seedUri)
+            assertThat(player.currentMediaItemIndex).isEqualTo(0)
+            assertThat(player.playWhenReady).isFalse()
+        } finally {
+            manager.detach(musicController)
+            musicController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun discoverPreviewInsertionDoesNotOverrideAPlayRequestDuringDownload() = runBlocking {
+        val seedUri = "file:///interrupted-discover-seed.m4a"
+        val physicalNextUri = "file:///interrupted-discover-next.m4a"
+        val userChoiceUri = "file:///interrupted-discover-user-choice.m4a"
+        val previewUri = "file:///interrupted-discover-preview.m4a"
+        val recommendation = LastfmTrack("Intervention Artist", "Stale Preview", 0.9)
+        val player = ExoPlayer.Builder(context).build()
+        player.setMediaItems(listOf(seedUri, physicalNextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        val session = MediaSession.Builder(context, player).build()
+        val musicController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+        val raceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val downloadStarted = CompletableDeferred<Unit>()
+        val releaseDownload = CompletableDeferred<Unit>()
+        val manager = RecommendationPreviewManager(
+            context = context,
+            appScope = raceScope,
+            downloadRepository = downloadRepository,
+            playlistRepository = PlaylistRepository(
+                database.playlistDao(),
+                database.trackDao()
+            ),
+            resolver = {
+                Result.success(
+                    ResolvedRecommendation(
+                        sourceUrl = "https://example.com/stale-preview.m4a",
+                        thumbnailUrl = "",
+                        mimeType = "audio/mp4"
+                    )
+                )
+            },
+            previewDownloader = { _, _, _, target ->
+                target.parentFile?.mkdirs()
+                target.writeBytes(byteArrayOf(0))
+                downloadStarted.complete(Unit)
+                releaseDownload.await()
+                Result.success(
+                    MediaTrack(
+                        uri = previewUri,
+                        title = recommendation.title,
+                        artist = recommendation.artist,
+                        isTransient = true
+                    )
+                )
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            musicController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            manager.attach(musicController)
+            manager.setDiscoverMode(enabled = true, recommendations = listOf(recommendation))
+            withTimeout(5_000) { downloadStarted.await() }
+
+            musicController.play(listOf(MediaTrack(uri = userChoiceUri, title = "User choice")))
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(musicController.currentTrack.value?.uri).isEqualTo(userChoiceUri)
+            assertThat(player.mediaItemCount).isEqualTo(1)
+
+            releaseDownload.complete(Unit)
+            withTimeout(5_000) { manager.state.first { !it.active } }
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.mediaItemCount).isEqualTo(1)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(userChoiceUri)
+        } finally {
+            releaseDownload.complete(Unit)
+            manager.detach(musicController)
+            raceScope.cancel()
+            musicController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun discoverHandoff_failedFirstPreviewRestoresPhysicalQueue() = runBlocking {
+        val seedUri = "file:///seed-failure.m4a"
+        val physicalNextUri = "file:///physical-next-failure.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        player.setMediaItems(
+            listOf(seedUri, physicalNextUri).map { uri ->
+                MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+            }
+        )
+        player.seekToDefaultPosition(0)
+        shadowOf(Looper.getMainLooper()).idle()
+        val musicController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+        val recommendation = LastfmTrack("Unavailable Artist", "Unavailable", 0.9)
+        val recommendationKey = RecommendationPreviewManager.recommendationKey(recommendation)
+
+        try {
+            val connected = CountDownLatch(1)
+            musicController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(musicController.currentTrack.value?.uri).isEqualTo(seedUri)
+            val manager = RecommendationPreviewManager(
+                context = context,
+                appScope = appScope,
+                downloadRepository = downloadRepository,
+                playlistRepository = PlaylistRepository(
+                    database.playlistDao(),
+                    database.trackDao()
+                ),
+                resolver = {
+                    delay(100)
+                    Result.failure(IllegalStateException("No preview source"))
+                }
+            )
+            manager.attach(musicController)
+            manager.setDiscoverMode(true, recommendations = listOf(recommendation))
+
+            withTimeout(5_000) { manager.state.first { it.active } }
+            withTimeout(5_000) { manager.state.first { recommendationKey in it.failures } }
+            withTimeout(5_000) { manager.state.first { !it.active } }
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.mediaItemCount).isEqualTo(2)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(seedUri)
+
+            manager.detach(musicController)
+        } finally {
+            musicController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun discoverHandoff_emptyRecommendationFetchRestoresPhysicalQueue() = runBlocking {
+        val seedUri = "file:///seed-empty.m4a"
+        val physicalNextUri = "file:///physical-next-empty.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        player.setMediaItems(
+            listOf(seedUri, physicalNextUri).map { uri ->
+                MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+            }
+        )
+        player.seekToDefaultPosition(0)
+        shadowOf(Looper.getMainLooper()).idle()
+        val musicController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+        val fetchStarted = CompletableDeferred<Unit>()
+        val fetchResult = CompletableDeferred<Result<List<LastfmTrack>>>()
+        val manager = RecommendationPreviewManager(
+            context = context,
+            appScope = appScope,
+            downloadRepository = downloadRepository,
+            playlistRepository = PlaylistRepository(
+                database.playlistDao(),
+                database.trackDao()
+            ),
+            discoverRecommendations = {
+                fetchStarted.complete(Unit)
+                fetchResult.await()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            musicController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            manager.attach(musicController)
+            manager.setDiscoverMode(enabled = true)
+            withTimeout(5_000) { fetchStarted.await() }
+            val isolatedRevision = musicController.queueRevision.value
+
+            fetchResult.complete(Result.success(emptyList()))
+            withTimeout(5_000) {
+                musicController.queueRevision.first { it > isolatedRevision }
+            }
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.mediaItemCount).isEqualTo(2)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(seedUri)
+
+            manager.detach(musicController)
+        } finally {
+            musicController.release()
+            session.release()
+            player.release()
+        }
     }
 
     @Test
@@ -561,4 +1132,35 @@ class RecommendationPreviewManagerTest {
         controller.release()
         Unit
     }
+}
+
+private class ControlledPlaybackStatePlayer(
+    player: Player,
+    initialPlaybackState: Int
+) : ForwardingPlayer(player) {
+    private val listeners = CopyOnWriteArraySet<Player.Listener>()
+
+    @Volatile
+    private var reportedPlaybackState = initialPlaybackState
+
+    override fun getPlaybackState(): Int = reportedPlaybackState
+
+    override fun addListener(listener: Player.Listener) {
+        listeners += listener
+        super.addListener(listener)
+    }
+
+    override fun removeListener(listener: Player.Listener) {
+        listeners -= listener
+        super.removeListener(listener)
+    }
+
+    fun transitionTo(state: Int) {
+        reportedPlaybackState = state
+        listeners.forEach { it.onPlaybackStateChanged(state) }
+    }
+
+    override fun prepare() = Unit
+
+    override fun play() = Unit
 }

@@ -54,7 +54,7 @@ fun MiniPlayer(
     canFavorite: Boolean = false,
     onToggleFavorite: () -> Unit = {}
 ) {
-    val isPlaying by musicController.isPlaying.collectAsState()
+    val playWhenReady by musicController.playWhenReady.collectAsState()
     val currentTrack by musicController.currentTrack.collectAsState()
     val progress by musicController.progress.collectAsState()
     val duration by musicController.duration.collectAsState()
@@ -184,8 +184,8 @@ fun MiniPlayer(
                 modifier = Modifier.size(Dimens.touchTargetMin)
             ) {
                 Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    imageVector = if (playWhenReady) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (playWhenReady) "Pause" else "Play",
                     tint = PrimaryText,
                     modifier = Modifier.size(Dimens.iconSizeMedium)
                 )

@@ -1,8 +1,13 @@
 package com.luno.mobile.playback
 
 import android.content.Context
+import android.os.Looper
+import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
+import androidx.media3.session.MediaSession
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
@@ -10,9 +15,12 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
@@ -129,6 +137,324 @@ class MusicControllerTest {
     @Test
     fun `play with empty list returns true before connection`() {
         assertThat(controller.play(emptyList<String>())).isTrue()
+    }
+
+    @Test
+    fun `retaining current item removes earlier and later queue entries`() {
+        val pastUri = "file:///past.m4a"
+        val currentUri = "file:///current.m4a"
+        val nextUri = "file:///next.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        player.setMediaItems(listOf(pastUri, currentUri, nextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(1)
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+
+            assertThat(connectedController.retainCurrentItemOnly()).isTrue()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.mediaItemCount).isEqualTo(1)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(currentUri)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun `retaining current item rejects a stale playback request revision`() {
+        val seedUri = "file:///revision-seed.m4a"
+        val oldNextUri = "file:///revision-old-next.m4a"
+        val userChoiceUri = "file:///revision-user-choice.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        player.setMediaItems(listOf(seedUri, oldNextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            val snapshotRevision = connectedController.playRequestRevision.value
+
+            connectedController.play(
+                listOf(
+                    MediaTrack(uri = seedUri, title = "Seed"),
+                    MediaTrack(uri = userChoiceUri, title = "New choice")
+                )
+            )
+
+            assertThat(connectedController.playRequestRevision.value)
+                .isGreaterThan(snapshotRevision)
+            assertThat(
+                connectedController.retainCurrentItemOnly(seedUri, snapshotRevision)
+            ).isFalse()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.mediaItemCount).isEqualTo(2)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(seedUri)
+            assertThat(player.getMediaItemAt(1).mediaId).isEqualTo(userChoiceUri)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun `context insertion rejects a preview from a stale play request revision`() {
+        val seedUri = "file:///stale-insert-seed.m4a"
+        val physicalNextUri = "file:///stale-insert-next.m4a"
+        val userChoiceUri = "file:///stale-insert-user-choice.m4a"
+        val previewUri = "file:///stale-insert-preview.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        player.setMediaItems(listOf(seedUri, physicalNextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            val previewRevision = connectedController.playRequestRevision.value
+            connectedController.play(listOf(track(userChoiceUri)))
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(
+                connectedController.insertIntoPlaybackContext(
+                    track = track(previewUri),
+                    afterUri = seedUri,
+                    insertBeforeCurrentIfAnchorMissing = true,
+                    resumeWhenIdle = false,
+                    expectedPlayRequestRevision = previewRevision
+                )
+            ).isFalse()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.mediaItemCount).isEqualTo(1)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(userChoiceUri)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun `deferred preview insertion resumes ended playback when play intent remains set`() {
+        val seedUri = "file:///ended-seed.m4a"
+        val previewUri = "file:///ended-preview.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        player.setMediaItems(listOf(seedUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        player.playWhenReady = true
+        val sessionPlayer = PlaybackStateOverridePlayer(player, Player.STATE_ENDED)
+        val session = MediaSession.Builder(context, sessionPlayer).build()
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(connectedController.playbackState.value).isEqualTo(Player.STATE_ENDED)
+            assertThat(connectedController.playWhenReady.value).isTrue()
+            val playCallsBeforeInsert = sessionPlayer.playCalls
+
+            assertThat(
+                connectedController.insertIntoPlaybackContext(
+                    track = MediaTrack(uri = previewUri, title = "Preview"),
+                    afterUri = seedUri,
+                    resumeWhenIdle = false,
+                    resumeWhenEnded = true
+                )
+            ).isTrue()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(sessionPlayer.playCalls).isGreaterThan(playCallsBeforeInsert)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun `deferred preview insertion does not resume ended playback after pause`() {
+        val seedUri = "file:///paused-ended-seed.m4a"
+        val previewUri = "file:///paused-ended-preview.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        player.setMediaItems(listOf(seedUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        player.playWhenReady = false
+        val sessionPlayer = PlaybackStateOverridePlayer(player, Player.STATE_ENDED)
+        val session = MediaSession.Builder(context, sessionPlayer).build()
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(connectedController.playbackState.value).isEqualTo(Player.STATE_ENDED)
+            assertThat(connectedController.playWhenReady.value).isFalse()
+            val playCallsBeforeInsert = sessionPlayer.playCalls
+
+            assertThat(
+                connectedController.insertIntoPlaybackContext(
+                    track = MediaTrack(uri = previewUri, title = "Preview"),
+                    afterUri = seedUri,
+                    resumeWhenIdle = false,
+                    resumeWhenEnded = true
+                )
+            ).isTrue()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(sessionPlayer.playCalls).isEqualTo(playCallsBeforeInsert)
+            assertThat(player.playWhenReady).isFalse()
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun `restoring an ended physical queue rechecks play intent after resume decision`() {
+        val seedUri = "file:///paused-restore-seed.m4a"
+        val nextUri = "file:///paused-restore-next.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        player.setMediaItems(listOf(seedUri, nextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        player.playWhenReady = false
+        val sessionPlayer = PlaybackStateOverridePlayer(player, Player.STATE_ENDED)
+        val session = MediaSession.Builder(context, sessionPlayer).build()
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(connectedController.playbackState.value).isEqualTo(Player.STATE_ENDED)
+            assertThat(connectedController.playWhenReady.value).isFalse()
+
+            assertThat(
+                connectedController.restoreQueueAroundCurrent(
+                    tracks = listOf(track(seedUri), track(nextUri)),
+                    currentUri = seedUri,
+                    currentIndex = 0,
+                    resumeAtNextIfEnded = true
+                )
+            ).isTrue()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat((0 until player.mediaItemCount).map {
+                player.getMediaItemAt(it).mediaId
+            }).containsExactly(seedUri, nextUri).inOrder()
+            assertThat(player.currentMediaItemIndex).isEqualTo(0)
+            assertThat(player.playWhenReady).isFalse()
+            assertThat(sessionPlayer.playCalls).isEqualTo(0)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun `restoring an ended physical queue advances while play intent remains set`() {
+        val seedUri = "file:///playing-restore-seed.m4a"
+        val nextUri = "file:///playing-restore-next.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        player.setMediaItems(listOf(seedUri, nextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        player.playWhenReady = true
+        val sessionPlayer = PlaybackStateOverridePlayer(player, Player.STATE_ENDED)
+        val session = MediaSession.Builder(context, sessionPlayer).build()
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(connectedController.playbackState.value).isEqualTo(Player.STATE_ENDED)
+            assertThat(connectedController.playWhenReady.value).isTrue()
+            val playCallsBeforeRestore = sessionPlayer.playCalls
+
+            assertThat(
+                connectedController.restoreQueueAroundCurrent(
+                    tracks = listOf(track(seedUri), track(nextUri)),
+                    currentUri = seedUri,
+                    currentIndex = 0,
+                    resumeAtNextIfEnded = true
+                )
+            ).isTrue()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(nextUri)
+            assertThat(player.currentMediaItemIndex).isEqualTo(1)
+            assertThat(player.playWhenReady).isTrue()
+            assertThat(sessionPlayer.playCalls).isGreaterThan(playCallsBeforeRestore)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
     }
 
     @Test
@@ -609,12 +935,62 @@ class MusicControllerTest {
         // Before connection, lastDispatchedRequest is null.
         assertThat(controller.lastDispatchedRequest).isNull()
     }
+
+    @Test
+    fun `toggle play pause pauses when session requests playback but player is not playing`() {
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            val playWhenReadyState = connectedController.playWhenReady
+
+            connectedController.togglePlayPause()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.playWhenReady).isTrue()
+            assertThat(player.isPlaying).isFalse()
+            assertThat(playWhenReadyState.value).isTrue()
+
+            connectedController.togglePlayPause()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.playWhenReady).isFalse()
+            assertThat(playWhenReadyState.value).isFalse()
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
 }
 
 // ── Test helpers ─────────────────────────────────────────────────────────
 
 /** Shorthand for creating a [MediaTrack] with just a URI. */
 private fun track(uri: String): MediaTrack = MediaTrack(uri = uri)
+
+private class PlaybackStateOverridePlayer(
+    player: Player,
+    private val stateOverride: Int
+) : ForwardingPlayer(player) {
+    var playCalls: Int = 0
+        private set
+
+    override fun getPlaybackState(): Int = stateOverride
+
+    override fun play() {
+        playCalls++
+        super.play()
+    }
+}
 
 // ── Test double ───────────────────────────────────────────────────────────
 

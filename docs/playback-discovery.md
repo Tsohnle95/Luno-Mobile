@@ -63,6 +63,22 @@ Resolution uses [download/extraction adapters](downloads.md) and bounded waits;
 waiting/resolving/preparing/ready/failure and saving/queued/permanent states
 must remain distinct.
 
+When Discover is enabled on a normal track, capture the physical queue and keep
+only the current item in Media3 until a recommendation is prepared. This prevents
+automatic queue advancement from escaping into the physical playlist during a
+slow resolve/download. With Repeat All enabled, the seed may repeat while the
+recommendation is unavailable, but the repeat cannot wrap to an earlier physical
+track; a prepared recommendation becomes its next item. If the current item ends
+first, the first ready preview resumes from the ended state; a stop/pause must
+not be mistaken for natural end. If Discover is disabled or previews fail before
+one plays, restore the saved physical queue around the still-playing seed without
+restarting it. A newer explicit play request supersedes that saved queue snapshot.
+
+`MusicController.isPlaying` describes actual playback for progress/preview
+animation. Its separate `playWhenReady` flow mirrors MediaSession play intent and
+owns transport-button icons/toggling, so controls stay aligned while buffering or
+when playback is controlled from the notification.
+
 App controls call `skipToNext`; external MediaSession Next is intercepted by
 the service callback and routed through `handleSessionNext`. Both converge on
 `routeNextWithinPreview`: pending Discover handoff/recommendation/page owns Next
@@ -75,10 +91,16 @@ actual durable completion. See [cross-boundary routes](../project_brain.md).
 
 - [MusicControllerTest](../app/src/test/java/com/luno/mobile/playback/MusicControllerTest.kt):
   pending requests/generations/release, metadata, context/queue seams, errors,
-  history restoration.
+  history restoration, session play-intent toggling, and retaining the current
+  item while a deferred context is prepared.
 - [RecommendationPreviewManagerTest](../app/src/test/java/com/luno/mobile/playback/RecommendationPreviewManagerTest.kt):
   handoff/session Next/page load, windows, prepared retention/back navigation,
-  save deduplication/completion, timeout spinner clearing.
+  save deduplication/completion, timeout spinner clearing, Discover queue fencing
+  under Repeat All and full queue restoration around the still-playing seed, and
+  resuming a deferred preview after natural end without overriding a newer play.
+- [FullPlayerRecommendationStatusTest](../app/src/test/java/com/luno/mobile/ui/player/FullPlayerRecommendationStatusTest.kt):
+  transport icons use session play intent; ready recommendations keep the artist
+  line and expose a separate Ready to play icon.
 - [DiscoveryRepositoryTest](../app/src/test/java/com/luno/mobile/data/repository/DiscoveryRepositoryTest.kt),
   [LastfmServiceTest](../app/src/test/java/com/luno/mobile/data/discovery/LastfmServiceTest.kt),
   [RecommendationArtworkServiceTest](../app/src/test/java/com/luno/mobile/data/discovery/RecommendationArtworkServiceTest.kt).

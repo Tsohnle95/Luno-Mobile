@@ -6,6 +6,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
@@ -22,6 +25,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -266,6 +271,88 @@ class MusicControllerInstrumentedTest {
                 player.getMediaItemAt(it).mediaId
             }).containsExactlyElementsIn(tracks.map { it.uri }).inOrder()
             assertThat(player.currentMediaItemIndex).isEqualTo(1)
+        } finally {
+            testController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun playWhenReadyIntentTracksExternalControlWhilePlayerIsIdle() {
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        val localConnector = MusicController.AsyncConnector { ctx ->
+            MediaController.Builder(ctx, session.token).buildAsync()
+        }
+        val testController = MusicController(context, connector = localConnector)
+        var externalController: MediaController? = null
+
+        try {
+            val connectedLatch = CountDownLatch(1)
+            testController.initialize { connectedLatch.countDown() }
+            assertThat(connectedLatch.await(5, TimeUnit.SECONDS)).isTrue()
+
+            externalController = MediaController.Builder(context, session.token)
+                .buildAsync()
+                .get(5, TimeUnit.SECONDS)
+            externalController.play()
+            runBlocking {
+                withTimeout(5_000) {
+                    testController.playWhenReady.first { it }
+                }
+            }
+
+            assertThat(player.playWhenReady).isTrue()
+            assertThat(player.isPlaying).isFalse()
+
+            testController.togglePlayPause()
+            runBlocking {
+                withTimeout(5_000) {
+                    testController.playWhenReady.first { !it }
+                }
+            }
+            assertThat(player.playWhenReady).isFalse()
+        } finally {
+            externalController?.release()
+            testController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun retainCurrentItemOnlyKeepsOnlyCurrentItemOnDevice() {
+        val seedUri = "file:///device-seed.m4a"
+        val physicalNextUri = "file:///device-physical-next.m4a"
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        player.setMediaItems(listOf(seedUri, physicalNextUri).map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        val queueTrimmed = CountDownLatch(1)
+        player.addListener(object : Player.Listener {
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                if (player.mediaItemCount == 1) queueTrimmed.countDown()
+            }
+        })
+        val localConnector = MusicController.AsyncConnector { ctx ->
+            MediaController.Builder(ctx, session.token).buildAsync()
+        }
+        val testController = MusicController(context, connector = localConnector)
+
+        try {
+            val connectedLatch = CountDownLatch(1)
+            testController.initialize { connectedLatch.countDown() }
+            assertThat(connectedLatch.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(player.mediaItemCount).isEqualTo(2)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(seedUri)
+
+            assertThat(testController.retainCurrentItemOnly()).isTrue()
+            assertThat(queueTrimmed.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(player.mediaItemCount).isEqualTo(1)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(seedUri)
         } finally {
             testController.release()
             session.release()

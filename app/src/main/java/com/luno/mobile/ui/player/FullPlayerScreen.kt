@@ -141,6 +141,7 @@ fun FullPlayerScreen(
     onBack: () -> Unit
 ) {
     val isPlaying by musicController.isPlaying.collectAsState()
+    val playWhenReady by musicController.playWhenReady.collectAsState()
     val currentTrack by musicController.currentTrack.collectAsState()
     val progress by musicController.progress.collectAsState()
     val duration by musicController.duration.collectAsState()
@@ -516,7 +517,7 @@ fun FullPlayerScreen(
             artworkUri = displayArtworkUri,
             title = displayTitle,
             artist = displayArtist,
-            isPlaying = isPlaying,
+            isPlaying = playWhenReady,
             onBack = onBack,
             onPrevious = musicController::skipToPrevious,
             onPlayPause = musicController::togglePlayPause,
@@ -800,12 +801,12 @@ fun FullPlayerScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (isPlaying) {
+                        imageVector = if (playWhenReady) {
                             Icons.Filled.PauseCircle
                         } else {
                             Icons.Filled.PlayCircle
                         },
-                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        contentDescription = if (playWhenReady) "Pause" else "Play",
                         tint = PrimaryText,
                         modifier = Modifier.size(56.dp)
                     )
@@ -1310,7 +1311,6 @@ private fun FullPlayerRecommendationRow(
                     queuedPreview -> "Queued for temporary preview"
                     resolving -> "Finding a playable source..."
                     preparing -> "Downloading temporary preview..."
-                    ready -> "Ready in temporary queue"
                     else -> "${recommendation.artist} - " +
                         "${(recommendation.match * 100).roundToInt()}% match"
                 }

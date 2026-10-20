@@ -77,6 +77,10 @@ class MusicController @JvmOverloads constructor(
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
+    /** Session play intent for transport controls, independent of audible playback state. */
+    private val _playWhenReady = MutableStateFlow(false)
+    val playWhenReady: StateFlow<Boolean> = _playWhenReady.asStateFlow()
+
     private val _currentTrack = MutableStateFlow<MediaTrack?>(null)
     val currentTrack: StateFlow<MediaTrack?> = _currentTrack.asStateFlow()
 
@@ -98,6 +102,7 @@ class MusicController @JvmOverloads constructor(
     private val _queueRevision = MutableStateFlow(0L)
     val queueRevision: StateFlow<Long> = _queueRevision.asStateFlow()
 
+    private val playRequestLock = Any()
     private val _playRequestRevision = MutableStateFlow(0L)
     internal val playRequestRevision: StateFlow<Long> = _playRequestRevision.asStateFlow()
 
@@ -167,6 +172,10 @@ class MusicController @JvmOverloads constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "listener onIsPlayingChanged failed: ${e.message}")
             }
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            _playWhenReady.value = playWhenReady
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -340,13 +349,60 @@ class MusicController @JvmOverloads constructor(
     }
 
     private fun dispatchPlayback(request: PlaybackRequest): Boolean {
-        _playRequestRevision.value = _playRequestRevision.value + 1L
-        val ctrl = controller
-        if (ctrl != null) {
-            return playOnController(ctrl, request)
+        val ctrl = synchronized(playRequestLock) {
+            _playRequestRevision.value = _playRequestRevision.value + 1L
+            controller.also { if (it == null) pendingRequest = request }
         }
-        pendingRequest = request
-        return true
+        return ctrl?.let { playOnController(it, request) } ?: true
+    }
+
+    /** Serializes a queue mutation against newer in-app playback requests. */
+    internal fun runIfPlayRequestRevision(expectedRevision: Long, block: () -> Unit): Boolean =
+        synchronized(playRequestLock) {
+            if (_playRequestRevision.value != expectedRevision) {
+                false
+            } else {
+                block()
+                true
+            }
+        }
+
+    private fun retainCurrentItemOnly(
+        expectedCurrentUri: String?,
+        expectedPlayRequestRevision: Long?
+    ): Boolean {
+        if (released) return false
+        return synchronized(playRequestLock) {
+            if (expectedPlayRequestRevision != null &&
+                _playRequestRevision.value != expectedPlayRequestRevision
+            ) {
+                return@synchronized false
+            }
+            val ctrl = controller ?: return@synchronized false
+            var retained = false
+            safePlayerCommand("retainCurrentPlaybackItem") {
+                val currentRawIndex = ctrl.currentMediaItemIndex
+                if (currentRawIndex !in 0 until ctrl.mediaItemCount) {
+                    return@safePlayerCommand
+                }
+                if (expectedCurrentUri != null &&
+                    ctrl.getMediaItemAt(currentRawIndex).mediaId != expectedCurrentUri
+                ) {
+                    return@safePlayerCommand
+                }
+                val removedIndices = (0 until ctrl.mediaItemCount)
+                    .filter { it != currentRawIndex }
+                    .sortedDescending()
+                if (removedIndices.isNotEmpty()) {
+                    val removedUris = removedIndices.map { ctrl.getMediaItemAt(it).mediaId }.toSet()
+                    removedIndices.forEach(ctrl::removeMediaItem)
+                    manualQueueUris.removeAll(removedUris)
+                    bumpQueueRevision()
+                }
+                retained = true
+            }
+            retained
+        }
     }
 
     /**
@@ -428,7 +484,7 @@ class MusicController @JvmOverloads constructor(
     fun togglePlayPause() {
         if (released) return
         safePlayerCommand("playPause") {
-            controller?.let { if (it.isPlaying) it.pause() else it.play() }
+            controller?.let { if (it.playWhenReady) it.pause() else it.play() }
         }
     }
 
@@ -667,53 +723,136 @@ class MusicController @JvmOverloads constructor(
         return appended
     }
 
+    /** Restores a saved physical queue around the still-current item without replaying it. */
+    internal fun restoreQueueAroundCurrent(
+        tracks: List<MediaTrack>,
+        currentUri: String,
+        currentIndex: Int,
+        resumeAtNextIfEnded: Boolean
+    ): Boolean {
+        if (released || tracks.isEmpty() || currentIndex !in tracks.indices ||
+            tracks[currentIndex].uri != currentUri
+        ) {
+            return false
+        }
+        val ctrl = controller ?: return false
+        var restored = false
+        safePlayerCommand("restorePhysicalQueueAroundCurrent") {
+            val actualCurrentIndex = ctrl.currentMediaItemIndex
+            if (actualCurrentIndex !in 0 until ctrl.mediaItemCount ||
+                ctrl.getMediaItemAt(actualCurrentIndex).mediaId != currentUri
+            ) {
+                return@safePlayerCommand
+            }
+
+            val removedIndices = (0 until ctrl.mediaItemCount)
+                .filter { it != actualCurrentIndex }
+                .sortedDescending()
+            if (removedIndices.isNotEmpty()) {
+                val removedUris = removedIndices.map { ctrl.getMediaItemAt(it).mediaId }.toSet()
+                removedIndices.forEach(ctrl::removeMediaItem)
+                manualQueueUris.removeAll(removedUris)
+            }
+
+            val beforeCurrent = tracks.take(currentIndex).mapIndexed { index, track ->
+                buildMediaItem(
+                    track,
+                    enrichArtwork = currentIndex - index <= ENRICH_WINDOW
+                )
+            }
+            val afterCurrent = tracks.drop(currentIndex + 1).mapIndexed { offset, track ->
+                buildMediaItem(
+                    track,
+                    enrichArtwork = offset + 1 <= ENRICH_WINDOW
+                )
+            }
+            if (beforeCurrent.isNotEmpty()) {
+                ctrl.addMediaItems(0, beforeCurrent)
+            }
+            if (afterCurrent.isNotEmpty()) {
+                ctrl.addMediaItems(currentIndex + 1, afterCurrent)
+            }
+            if (removedIndices.isNotEmpty() || beforeCurrent.isNotEmpty() ||
+                afterCurrent.isNotEmpty()
+            ) {
+                bumpQueueRevision()
+            }
+
+            if (resumeAtNextIfEnded && ctrl.playbackState == Player.STATE_ENDED &&
+                ctrl.playWhenReady && currentIndex + 1 < tracks.size
+            ) {
+                ctrl.seekToDefaultPosition(currentIndex + 1)
+                ctrl.prepare()
+                ctrl.play()
+            }
+            restored = true
+        }
+        return restored
+    }
+
     /**
      * Inserts a temporary context item immediately after [afterUri]. When the
      * anchor is unavailable, the item is inserted after the current item, or
      * before it when [insertBeforeCurrentIfAnchorMissing] is set. The
      * insertion does not replace playback or mark the item as user-queued.
      * With [resumeWhenIdle] = false (the deferred Discover handoff), an
-     * ended/idle player is left alone — the inserted block never starts
-     * playback by itself.
+     * idle player is left alone. [resumeWhenEnded] resumes only if the current
+     * item has naturally ended and MediaSession still has play intent when the
+     * queue insertion is applied. When [expectedPlayRequestRevision] is
+     * supplied, the insertion is serialized against newer playback requests
+     * and rejected if the request has become stale.
      */
     fun insertIntoPlaybackContext(
         track: MediaTrack,
         afterUri: String? = null,
         insertBeforeCurrentIfAnchorMissing: Boolean = false,
-        resumeWhenIdle: Boolean = true
+        resumeWhenIdle: Boolean = true,
+        resumeWhenEnded: Boolean = false,
+        expectedPlayRequestRevision: Long? = null
     ): Boolean {
         if (released) return false
         val ctrl = controller ?: return false
         var inserted = false
-        safePlayerCommand("insertPlaybackContext") {
-            val playbackIndices = playbackOrderIndices(ctrl)
-            val anchorRawIndex = afterUri
-                ?.let { uri ->
-                    playbackIndices.firstOrNull { index ->
-                        ctrl.getMediaItemAt(index).mediaId == uri
+        val insert = {
+            safePlayerCommand("insertPlaybackContext") {
+                val playbackIndices = playbackOrderIndices(ctrl)
+                val anchorRawIndex = afterUri
+                    ?.let { uri ->
+                        playbackIndices.firstOrNull { index ->
+                            ctrl.getMediaItemAt(index).mediaId == uri
+                        }
                     }
-                }
-            val currentRawIndex = ctrl.currentMediaItemIndex
-            val insertAt = when {
-                anchorRawIndex != null -> anchorRawIndex + 1
-                insertBeforeCurrentIfAnchorMissing &&
-                    currentRawIndex in 0 until ctrl.mediaItemCount -> currentRawIndex
-                currentRawIndex in 0 until ctrl.mediaItemCount -> currentRawIndex + 1
-                else -> ctrl.mediaItemCount
-            }.coerceIn(0, ctrl.mediaItemCount)
-            val resumePlayback = resumeWhenIdle && (
-                ctrl.mediaItemCount == 0 ||
-                    ctrl.playbackState == Player.STATE_ENDED ||
-                    ctrl.playbackState == Player.STATE_IDLE
+                val currentRawIndex = ctrl.currentMediaItemIndex
+                val insertAt = when {
+                    anchorRawIndex != null -> anchorRawIndex + 1
+                    insertBeforeCurrentIfAnchorMissing &&
+                        currentRawIndex in 0 until ctrl.mediaItemCount -> currentRawIndex
+                    currentRawIndex in 0 until ctrl.mediaItemCount -> currentRawIndex + 1
+                    else -> ctrl.mediaItemCount
+                }.coerceIn(0, ctrl.mediaItemCount)
+                val resumePlayback = (resumeWhenIdle && (
+                    ctrl.mediaItemCount == 0 ||
+                        ctrl.playbackState == Player.STATE_ENDED ||
+                        ctrl.playbackState == Player.STATE_IDLE
+                    )) || shouldResumeDeferredPreview(
+                    deferredPlayback = resumeWhenEnded,
+                    playbackState = ctrl.playbackState,
+                    playWhenReady = ctrl.playWhenReady
                 )
-            ctrl.addMediaItem(insertAt, buildMediaItem(track, enrichArtwork = true))
-            if (resumePlayback) {
-                ctrl.seekToDefaultPosition(insertAt.coerceAtMost(ctrl.mediaItemCount - 1))
-                ctrl.prepare()
-                ctrl.play()
+                ctrl.addMediaItem(insertAt, buildMediaItem(track, enrichArtwork = true))
+                if (resumePlayback) {
+                    ctrl.seekToDefaultPosition(insertAt.coerceAtMost(ctrl.mediaItemCount - 1))
+                    ctrl.prepare()
+                    ctrl.play()
+                }
+                bumpQueueRevision()
+                inserted = true
             }
-            bumpQueueRevision()
-            inserted = true
+        }
+        if (expectedPlayRequestRevision == null) {
+            insert()
+        } else {
+            runIfPlayRequestRevision(expectedPlayRequestRevision, insert)
         }
         return inserted
     }
@@ -766,6 +905,15 @@ class MusicController @JvmOverloads constructor(
         return removed
     }
 
+    /** Keeps only the current item in the timeline without stopping its playback. */
+    fun retainCurrentItemOnly(): Boolean = retainCurrentItemOnly(null, null)
+
+    /** Keeps the current item only if the captured track/request is still current. */
+    internal fun retainCurrentItemOnly(
+        expectedCurrentUri: String,
+        expectedPlayRequestRevision: Long
+    ): Boolean = retainCurrentItemOnly(expectedCurrentUri as String?, expectedPlayRequestRevision as Long?)
+
     /** Stops playback and removes every queued item, including stale temp URIs. */
     fun clearPlaybackQueue() {
         if (released) return
@@ -777,6 +925,7 @@ class MusicController @JvmOverloads constructor(
             }
             manualQueueUris.clear()
             _isPlaying.value = false
+            _playWhenReady.value = false
             _hasActiveItem.value = false
             _currentTrack.value = null
             _progress.value = 0L
@@ -825,6 +974,7 @@ class MusicController @JvmOverloads constructor(
         if (released) return
         safePlayerCommand("stop") { controller?.stop() }
         _isPlaying.value = false
+        _playWhenReady.value = false
         stopProgressUpdates()
     }
 
@@ -919,6 +1069,7 @@ class MusicController @JvmOverloads constructor(
     private fun hydrateState(ctrl: MediaController) {
         _isConnected.value = true
         _isPlaying.value = ctrl.isPlaying
+        _playWhenReady.value = ctrl.playWhenReady
         _playbackState.value = ctrl.playbackState
         _hasActiveItem.value = ctrl.mediaItemCount > 0
         _repeatMode.value = ctrl.repeatMode
@@ -1214,6 +1365,13 @@ class MusicController @JvmOverloads constructor(
         internal const val METADATA_TRANSIENT =
             "com.luno.mobile.playback.TRANSIENT"
         private const val TAG = "MusicController"
+
+        internal fun shouldResumeDeferredPreview(
+            deferredPlayback: Boolean,
+            playbackState: Int,
+            playWhenReady: Boolean
+        ): Boolean = deferredPlayback && playWhenReady && playbackState == Player.STATE_ENDED
+
     }
 }
 

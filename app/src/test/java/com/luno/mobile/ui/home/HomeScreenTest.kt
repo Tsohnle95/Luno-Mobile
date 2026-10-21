@@ -5,6 +5,7 @@ import com.luno.mobile.data.db.dao.PlaylistWithTracks
 import com.luno.mobile.data.db.entity.DownloadJob
 import com.luno.mobile.data.db.entity.DownloadState
 import com.luno.mobile.data.db.entity.Playlist
+import com.luno.mobile.data.db.entity.SystemPlaylists
 import com.luno.mobile.data.db.entity.Track
 import com.luno.mobile.playback.MediaTrack
 import com.luno.mobile.playback.PlaybackSource
@@ -12,6 +13,18 @@ import com.luno.mobile.ui.components.formatPlaylistDuration
 import org.junit.Test
 
 class HomeScreenTest {
+    @Test
+    fun homePlaylistLabel_namesTheVirtualFavoritesShortcutFavoriteSongs() {
+        assertThat(homePlaylistLabel(SystemPlaylists.FAVORITES_ID, "Favorites"))
+            .isEqualTo("Favorite Songs")
+    }
+
+    @Test
+    fun homePlaylistLabel_preservesRealPlaylistNames() {
+        assertThat(homePlaylistLabel(42L, "Reggae"))
+            .isEqualTo("Reggae")
+    }
+
     @Test
     fun recentlyPlayedPlaylists_returnsSixNewestPersistedPlaylistsOnly() {
         val playlists = (1L..8L).map { id ->

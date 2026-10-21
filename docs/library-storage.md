@@ -49,7 +49,7 @@ timestamp advances from the library playback callback when a non-transient
 track with that playlist's `PlaybackSource` becomes current; opening a playlist
 does not count as listening. Home orders these timestamps newest first, followed
 by legacy playlist IDs from saved recent track history when their timestamps
-are still zero. Its six quick shortcuts contain Liked Songs and up to five real
+are still zero. Its six quick shortcuts contain Favorite Songs and up to five real
 playlists, filling unused recent slots from the library. Jump Back In uses recent
 tracks; Your Shows currently projects library playlists, not podcast episodes.
 Existing rows migrate with

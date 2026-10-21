@@ -123,6 +123,12 @@ internal fun recentlyDownloadedTracks(
     .take(limit.coerceAtLeast(0))
     .toList()
 
+/** Label used by the Home quick-playlist row for the virtual favorites list. */
+internal const val HOME_FAVORITES_LABEL = "Favorite Songs"
+
+internal fun homePlaylistLabel(playlistId: Long, name: String): String =
+    if (playlistId == SystemPlaylists.FAVORITES_ID) HOME_FAVORITES_LABEL else name
+
 /** Returns the six most recently played real playlists, newest first. */
 internal fun recentlyPlayedPlaylists(
     playlists: List<PlaylistWithTracks>,
@@ -1086,11 +1092,7 @@ private fun RecentPlaylistTile(
             )
         }
         Text(
-            text = if (playlist.playlist.id == SystemPlaylists.FAVORITES_ID) {
-                "Liked Songs"
-            } else {
-                playlist.playlist.name
-            },
+            text = homePlaylistLabel(playlist.playlist.id, playlist.playlist.name),
             style = MaterialTheme.typography.labelLarge,
             color = PrimaryText,
             maxLines = 2,

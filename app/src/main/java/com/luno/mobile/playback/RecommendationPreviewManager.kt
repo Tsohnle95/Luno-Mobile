@@ -1737,6 +1737,11 @@ class RecommendationPreviewManager(
                     seedUri = previousPreviewState.seedUri,
                     recommendations = previousPreviewState.recommendations,
                     discoverMode = _state.value.discoverMode,
+                    // A failed/timed-out recommendation is the only user-visible
+                    // outcome when every item in a session fails. Resetting
+                    // failures here made the spinner disappear and the retry
+                    // tile vanish until the user started another session.
+                    failures = previousPreviewState.failures,
                     prefetchedKeys = retainedForPrefetch.keys.toSet()
                 )
             )

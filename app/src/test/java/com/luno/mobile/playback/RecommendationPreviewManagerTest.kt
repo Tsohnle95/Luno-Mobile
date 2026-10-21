@@ -1077,7 +1077,9 @@ class RecommendationPreviewManagerTest {
         assertThat(failedState.resolvingKeys).doesNotContain(key)
         assertThat(failedState.preparingKeys).doesNotContain(key)
         assertThat(failedState.failures.getValue(key)).contains("timed out")
-        awaitPreviewState(manager) { !it.active }
+        val settled = awaitPreviewState(manager) { !it.active }
+        // The session cleanup must not erase the only user-visible outcome.
+        assertThat(settled.failures.getValue(key)).contains("timed out")
         controller.release()
         Unit
     }
@@ -1123,7 +1125,9 @@ class RecommendationPreviewManagerTest {
         assertThat(failedState.resolvingKeys).doesNotContain(key)
         assertThat(failedState.preparingKeys).doesNotContain(key)
         assertThat(failedState.failures.getValue(key)).contains("download timed out")
-        awaitPreviewState(manager) { !it.active }
+        val settled = awaitPreviewState(manager) { !it.active }
+        // The session cleanup must not erase the only user-visible outcome.
+        assertThat(settled.failures.getValue(key)).contains("download timed out")
         controller.release()
         Unit
     }

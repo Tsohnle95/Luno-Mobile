@@ -28,6 +28,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -476,9 +477,7 @@ class RecommendationPreviewManagerTest {
             "file:///durable/song.m4a",
             System.currentTimeMillis()
         )
-        withTimeout(5_000) {
-            manager.state.first { key in it.permanentKeys }
-        }
+        awaitPreviewState(manager) { key in it.permanentKeys }
 
         assertThat(manager.state.value.queuedKeys).doesNotContain(key)
         assertThat(manager.state.value.saveFailures).doesNotContainKey(key)
@@ -527,7 +526,7 @@ class RecommendationPreviewManagerTest {
                 enabled = true,
                 recommendations = listOf(LastfmTrack("Repeat Artist", "Ready Later", 0.9))
             )
-            withTimeout(5_000) { manager.state.first { it.active } }
+            awaitPreviewState(manager) { it.active }
             shadowOf(Looper.getMainLooper()).idle()
 
             assertThat(player.mediaItemCount).isEqualTo(1)
@@ -905,7 +904,7 @@ class RecommendationPreviewManagerTest {
             assertThat(player.mediaItemCount).isEqualTo(1)
 
             releaseDownload.complete(Unit)
-            withTimeout(5_000) { manager.state.first { !it.active } }
+            awaitPreviewState(manager) { !it.active }
             shadowOf(Looper.getMainLooper()).idle()
 
             assertThat(player.mediaItemCount).isEqualTo(1)
@@ -963,9 +962,9 @@ class RecommendationPreviewManagerTest {
             manager.attach(musicController)
             manager.setDiscoverMode(true, recommendations = listOf(recommendation))
 
-            withTimeout(5_000) { manager.state.first { it.active } }
-            withTimeout(5_000) { manager.state.first { recommendationKey in it.failures } }
-            withTimeout(5_000) { manager.state.first { !it.active } }
+            awaitPreviewState(manager) { it.active }
+            awaitPreviewState(manager) { recommendationKey in it.failures }
+            awaitPreviewState(manager) { !it.active }
             shadowOf(Looper.getMainLooper()).idle()
 
             assertThat(player.mediaItemCount).isEqualTo(2)
@@ -1074,13 +1073,11 @@ class RecommendationPreviewManagerTest {
         )
 
         val key = RecommendationPreviewManager.recommendationKey(recommendation)
-        val failedState = withTimeout(5_000) {
-            manager.state.first { key in it.failures }
-        }
+        val failedState = awaitPreviewState(manager) { key in it.failures }
         assertThat(failedState.resolvingKeys).doesNotContain(key)
         assertThat(failedState.preparingKeys).doesNotContain(key)
         assertThat(failedState.failures.getValue(key)).contains("timed out")
-        withTimeout(5_000) { manager.state.first { !it.active } }
+        awaitPreviewState(manager) { !it.active }
         controller.release()
         Unit
     }
@@ -1122,15 +1119,34 @@ class RecommendationPreviewManagerTest {
         )
 
         val key = RecommendationPreviewManager.recommendationKey(recommendation)
-        val failedState = withTimeout(5_000) {
-            manager.state.first { key in it.failures }
-        }
+        val failedState = awaitPreviewState(manager) { key in it.failures }
         assertThat(failedState.resolvingKeys).doesNotContain(key)
         assertThat(failedState.preparingKeys).doesNotContain(key)
         assertThat(failedState.failures.getValue(key)).contains("download timed out")
-        withTimeout(5_000) { manager.state.first { !it.active } }
+        awaitPreviewState(manager) { !it.active }
         controller.release()
         Unit
+    }
+
+    /**
+     * Wait off the test thread so the Robolectric main looper is not the
+     * collector's dispatcher. CI runners can schedule preview work much later
+     * than a local machine, so keep a generous bound and report the last state.
+     */
+    private suspend fun awaitPreviewState(
+        manager: RecommendationPreviewManager,
+        timeoutMs: Long = 15_000,
+        predicate: (RecommendationPreviewState) -> Boolean
+    ): RecommendationPreviewState = withContext(Dispatchers.Default) {
+        try {
+            withTimeout(timeoutMs) { manager.state.first(predicate) }
+        } catch (timeout: TimeoutCancellationException) {
+            throw AssertionError(
+                "Timed out after ${timeoutMs}ms waiting for preview state; " +
+                    "last=${manager.state.value}",
+                timeout
+            )
+        }
     }
 }
 

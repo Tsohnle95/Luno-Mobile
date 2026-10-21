@@ -752,6 +752,85 @@ class MusicControllerTest {
     }
 
     @Test
+    fun `playQueueItem jumps to the selected playback-order item`() {
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        val uris = listOf("file:///queue-a.m4a", "file:///queue-b.m4a", "file:///queue-c.m4a")
+        player.setMediaItems(uris.map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            player.playWhenReady = false
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(connectedController.playQueueItem(2)).isTrue()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(player.currentMediaItemIndex).isEqualTo(2)
+            assertThat(player.playWhenReady).isTrue()
+            assertThat(connectedController.playQueueItem(9)).isFalse()
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun `reconnectIfNeeded replaces a disconnected controller and restores transport`() {
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        val uris = listOf("file:///reconnect-a.m4a", "file:///reconnect-b.m4a")
+        player.setMediaItems(uris.map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.seekToDefaultPosition(0)
+        val connector = SequentialConnector()
+        val connectedController = MusicController(context, connector = connector)
+
+        try {
+            val firstFuture = MediaController.Builder(context, session.token).buildAsync()
+            connector.enqueue(firstFuture)
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(connectedController.isConnected.value).isTrue()
+
+            val firstController = firstFuture.get()
+            firstController.release()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(firstController.isConnected).isFalse()
+
+            connector.enqueue(MediaController.Builder(context, session.token).buildAsync())
+            connectedController.reconnectIfNeeded()
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(connector.connectCalls).isEqualTo(2)
+            assertThat(connectedController.isConnected.value).isTrue()
+            assertThat(connectedController.getQueue()).hasSize(uris.size)
+
+            assertThat(connectedController.playQueueItem(1)).isTrue()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.currentMediaItemIndex).isEqualTo(1)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
     fun `playNext does not throw before connection`() {
         controller.playNext(track("next"))
     }
@@ -1040,6 +1119,22 @@ class FakeConnector : MusicController.AsyncConnector {
     override fun connect(context: Context): ListenableFuture<MediaController> {
         lastConnectAttempt = true
         return connectFuture
+    }
+}
+
+/** Supplies a fresh controller future for each reconnect attempt. */
+class SequentialConnector : MusicController.AsyncConnector {
+    private val pending = mutableListOf<ListenableFuture<MediaController>>()
+    var connectCalls: Int = 0
+        private set
+
+    fun enqueue(future: ListenableFuture<MediaController>) {
+        pending += future
+    }
+
+    override fun connect(context: Context): ListenableFuture<MediaController> {
+        connectCalls++
+        return pending.removeFirstOrNull() ?: SettableFuture.create()
     }
 }
 

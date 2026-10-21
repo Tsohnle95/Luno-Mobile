@@ -406,6 +406,23 @@ class LibraryRepositoryTest {
         assertThat(database.trackDao().trackCount()).isEqualTo(4047)
     }
 
+    @Test
+    fun toggleFavorite_flipsAndPersistsTheNewValue() = runBlocking {
+        val track = Track(uri = "content://test/favorite-song", title = "Favorite Song")
+        database.trackDao().insertTrack(track)
+
+        assertThat(repository.toggleFavorite(track.uri)).isTrue()
+        assertThat(database.trackDao().getTrack(track.uri)?.isFavorite).isTrue()
+
+        assertThat(repository.toggleFavorite(track.uri)).isFalse()
+        assertThat(database.trackDao().getTrack(track.uri)?.isFavorite).isFalse()
+    }
+
+    @Test
+    fun toggleFavorite_unknownSongReturnsNull() = runBlocking {
+        assertThat(repository.toggleFavorite("content://test/not-in-library")).isNull()
+    }
+
     /**
      * Minimal in-memory SAF provider emulating an external-storage
      * DocumentsProvider: querying a document URI returns the document

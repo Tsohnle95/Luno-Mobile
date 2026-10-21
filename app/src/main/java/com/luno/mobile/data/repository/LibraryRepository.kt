@@ -952,6 +952,19 @@ class LibraryRepository(
         trackDao.setFavorite(uri, isFavorite)
     }
 
+    /**
+     * Flips the persisted favorite flag for [uri] and returns the new value,
+     * or null when the song is not in the library. The mini player and full
+     * player use this instead of deriving `!isFavorite` from composition
+     * state, which can be stale across reconnects/recompositions.
+     */
+    suspend fun toggleFavorite(uri: String): Boolean? {
+        val track = trackDao.getTrack(uri) ?: return null
+        val next = !track.isFavorite
+        trackDao.setFavorite(uri, next)
+        return next
+    }
+
     suspend fun deleteTrack(uri: String) = trackDao.deleteTrack(uri)
 
     /** Records global song popularity and, when applicable, playlist popularity. */

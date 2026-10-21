@@ -137,6 +137,9 @@ class MusicController @JvmOverloads constructor(
     /** Once true, this instance will never connect again. */
     @Volatile private var released = false
 
+    /** Prevents overlapping async connection attempts. */
+    @Volatile private var connecting = false
+
     /**
      * Single immutable pending request.  Replaced atomically on each
      * pre‑connection [play] / [playUri] call (last‑user‑request wins).
@@ -253,11 +256,13 @@ class MusicController @JvmOverloads constructor(
      *   controller is connected **and** any pending play has been dispatched.
      */
     fun initialize(onReady: () -> Unit = {}) {
-        if (released) return
+        if (released || connecting) return
+        connecting = true
         val currentGen = generation
         val controllerFuture = try {
             connector.connect(context)
         } catch (e: Exception) {
+            connecting = false
             reportConnectionError(
                 sanitizeErrorMessage("Failed to connect: ${e.message}")
             )
@@ -265,6 +270,7 @@ class MusicController @JvmOverloads constructor(
         }
 
         controllerFuture.addListener({
+            connecting = false
             // Stale future guard: release was called or a new generation started.
             if (released || generation != currentGen) {
                 releaseStaleController(controllerFuture)
@@ -287,6 +293,48 @@ class MusicController @JvmOverloads constructor(
                 )
             }
         }, MoreExecutors.directExecutor())
+    }
+
+    /**
+     * Re-establishes the MediaSession connection after the service was
+     * stopped or the controller was disconnected while the app was in the
+     * background. A disconnected controller silently ignores transport
+     * commands, which is why play/next/previous appeared dead until a new
+     * track was selected. No-op while connected, connecting or released.
+     */
+    fun reconnectIfNeeded() {
+        if (released || connecting) return
+        val current = controller
+        if (current?.isConnected == true) {
+            _isConnected.value = true
+            return
+        }
+        if (current != null) {
+            runCatching { current.removeListener(listener) }
+            runCatching { current.release() }
+            controller = null
+        }
+        _isConnected.value = false
+        initialize()
+    }
+
+    /**
+     * Plays the queue item at [queueIndex], where indexes are positions in
+     * the current playback order (the same order returned by [getQueue]).
+     * Used by the Playing Next list.
+     */
+    fun playQueueItem(queueIndex: Int): Boolean {
+        if (released) return false
+        var played = false
+        safePlayerCommand("playQueueItem") {
+            val ctrl = controller ?: return@safePlayerCommand
+            val rawIndex = playbackOrderIndices(ctrl).getOrNull(queueIndex)
+                ?: return@safePlayerCommand
+            ctrl.seekToDefaultPosition(rawIndex)
+            ctrl.play()
+            played = true
+        }
+        return played
     }
 
     /**

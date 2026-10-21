@@ -3,6 +3,7 @@ package com.luno.mobile.ui.player
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -155,6 +156,7 @@ fun PlayingNextTab(
                     track = track,
                     isDragging = draggingIndex == index,
                     offsetY = if (draggingIndex == index) dragOffsetY else 0f,
+                    onClick = { musicController.playQueueItem(index) },
                     onDragStart = {
                         draggingIndex = index
                         dragOffsetY = 0f
@@ -378,6 +380,7 @@ private fun QueueRow(
     track: MediaTrack,
     isDragging: Boolean,
     offsetY: Float,
+    onClick: () -> Unit,
     onDragStart: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit
@@ -394,6 +397,7 @@ private fun QueueRow(
                 alpha = if (isDragging) 0.92f else 1f
             }
             .zIndex(if (isDragging) 1f else 0f)
+            .clickable(onClick = onClick)
             .pointerInput(track.uri) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { onDragStart() },

@@ -82,6 +82,12 @@ owns transport-button icons/toggling, so controls stay aligned while buffering o
 when playback is controlled from the notification. Shuffle is a mode/queue
 control only: toggling it must never start playback from idle or jump the
 current item; audio starts only from an explicit play or track tap.
+Playing Next rows are interactive: tapping one calls `playQueueItem` with its
+playback-order index, which seeks to the matching raw item and starts it.
+When the app returns to the foreground, `MainActivity.onStart` calls
+`reconnectIfNeeded`; a disconnected MediaController silently ignores transport
+commands, so reconnecting and re-hydrating the session queue is required before
+play/next/previous can work again.
 
 App controls call `skipToNext`; external MediaSession Next is intercepted by
 the service callback and routed through `handleSessionNext`. Both converge on

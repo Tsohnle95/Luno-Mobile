@@ -61,6 +61,20 @@ class MainActivity : ComponentActivity() {
         handleNotificationIntent(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        // The MediaSession service can disconnect while the app is stopped.
+        // Reconnect before the UI becomes interactive so transport controls
+        // resume the loaded queue instead of silently no-oping.
+        musicController.reconnectIfNeeded()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Covers screen-off/on and other pauses that do not stop the activity.
+        musicController.reconnectIfNeeded()
+    }
+
     private fun handleNotificationIntent(intent: android.content.Intent?) {
         if (intent?.action != com.luno.mobile.playback.MusicService.ACTION_OPEN_PLAYER) return
         notificationOpenRequestId++

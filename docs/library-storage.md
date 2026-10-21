@@ -41,8 +41,10 @@ cancelled as soon as the sheet leaves composition.
 Favorites live on `Track.isFavorite`. Favorites is a reserved virtual projection,
 not an ordinary persisted membership owner. All Music is also virtual.
 The mini-player heart resolves the current playable URI against the Room library
-projection and delegates changes to `LibraryRepository.setFavorite`; temporary
-recommendations without a saved library row cannot be favorited there. Both the
+projection and calls `LibraryRepository.toggleFavorite`, which flips the stored
+flag and returns the new value; writes run in the application scope so leaving
+the mini player cannot cancel them. Do not derive the new value from a
+composition snapshot, which can be stale after reconnects. Both the
 Home overlay and other screens share this state through `MainShell`.
 Real playlists store `lastPlayedAt` beside their aggregate `playCount`. The
 timestamp advances from the library playback callback when a non-transient

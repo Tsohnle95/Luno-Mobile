@@ -178,13 +178,24 @@ fun MainShell(
         libraryTracks.firstOrNull { it.uri == activeTrack?.uri }
     }
     val miniPlayerIsFavorite = activeLibraryTrack?.isFavorite == true
-    val miniPlayerCanFavorite = activeLibraryTrack != null && activeTrack?.isTransient != true
+    val miniPlayerCanFavorite = activeTrack != null && activeTrack?.isTransient != true
 
     fun toggleMiniPlayerFavorite() {
-        val track = activeLibraryTrack ?: return
-        if (activeTrack?.isTransient == true) return
-        scope.launch {
-            app.libraryRepository.setFavorite(track.uri, !track.isFavorite)
+        val track = activeTrack ?: return
+        if (track.isTransient) return
+        // Use the app scope: the mini player can leave composition during
+        // navigation and a screen-scoped launch would cancel the DB write.
+        app.appScope.launch {
+            val newValue = app.libraryRepository.toggleFavorite(track.uri)
+            if (newValue == null) {
+                withContext(Dispatchers.Main.immediate) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "This song is not in your library yet",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
     }
 

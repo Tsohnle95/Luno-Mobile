@@ -266,7 +266,7 @@ fun LibraryScreen(
                 canPlay = mediaTracks.isNotEmpty(),
                 shuffleEnabled = shuffleEnabled,
                 onPlay = { onPlay(mediaTracks, 0, false) },
-                onShuffle = { onPlay(mediaTracks, 0, true) }
+                onShuffle = { musicController.toggleShuffle() }
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(Dimens.paddingSmall)) {
                     if (selectionMode) {

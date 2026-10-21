@@ -79,7 +79,9 @@ restarting it. A newer explicit play request supersedes that saved queue snapsho
 `MusicController.isPlaying` describes actual playback for progress/preview
 animation. Its separate `playWhenReady` flow mirrors MediaSession play intent and
 owns transport-button icons/toggling, so controls stay aligned while buffering or
-when playback is controlled from the notification.
+when playback is controlled from the notification. Shuffle is a mode/queue
+control only: toggling it must never start playback from idle or jump the
+current item; audio starts only from an explicit play or track tap.
 
 App controls call `skipToNext`; external MediaSession Next is intercepted by
 the service callback and routed through `handleSessionNext`. Both converge on

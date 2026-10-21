@@ -563,14 +563,17 @@ class MusicController @JvmOverloads constructor(
         }
     }
 
-    /** Toggles shuffle and immediately starts a different random queue item. */
+    /**
+     * Toggles shuffle mode only. It never starts playback or moves the
+     * current item: the queue order changes, and transport still requires an
+     * explicit play/track tap.
+     */
     fun toggleShuffle() {
         if (released) return
         safePlayerCommand("shuffle") {
             controller?.let { ctrl ->
                 val enabled = !ctrl.shuffleModeEnabled
                 ctrl.shuffleModeEnabled = enabled
-                if (enabled) randomizeCurrentItem(ctrl)
                 _shuffleEnabled.value = enabled
             }
         }
@@ -578,15 +581,14 @@ class MusicController @JvmOverloads constructor(
 
     /**
      * Sets ExoPlayer shuffle mode explicitly on the connected player.
-     * No-op before connection.
+     * No-op before connection. Does not start playback or change the current
+     * item; enabling shuffle only adjusts the upcoming playback order.
      */
     fun setShuffle(enabled: Boolean) {
         if (released) return
         safePlayerCommand("shuffle") {
             controller?.let { ctrl ->
-                val wasEnabled = ctrl.shuffleModeEnabled
                 ctrl.shuffleModeEnabled = enabled
-                if (enabled && !wasEnabled) randomizeCurrentItem(ctrl)
                 _shuffleEnabled.value = enabled
             }
         }
@@ -1225,23 +1227,6 @@ class MusicController @JvmOverloads constructor(
         progressUpdater = null
     }
 
-    private fun randomizeCurrentItem(ctrl: MediaController) {
-        if (ctrl.mediaItemCount <= 1) {
-            if (ctrl.mediaItemCount == 1) ctrl.play()
-            return
-        }
-        val current = ctrl.currentMediaItemIndex
-        val randomIndex = if (current in 0 until ctrl.mediaItemCount) {
-            // Pick uniformly from the N-1 items other than the current one.
-            val randomOffset = Random.nextInt(ctrl.mediaItemCount - 1)
-            randomIndexExcludingCurrent(ctrl.mediaItemCount, current, randomOffset)
-        } else {
-            Random.nextInt(ctrl.mediaItemCount)
-        }
-        ctrl.seekToDefaultPosition(randomIndex)
-        ctrl.play()
-    }
-
     private fun playbackOrderIndices(ctrl: MediaController): List<Int> {
         val timeline = ctrl.currentTimeline
         if (timeline.isEmpty) return emptyList()
@@ -1412,18 +1397,6 @@ data class MediaTrack(
     /** Temporary previews are playable but never persisted to history/counts. */
     val isTransient: Boolean = false
 )
-
-/** Maps a uniform offset in the N-1 eligible items to the original item index. */
-internal fun randomIndexExcludingCurrent(
-    itemCount: Int,
-    currentIndex: Int,
-    randomOffset: Int
-): Int {
-    require(itemCount > 1) { "At least two items are required" }
-    require(currentIndex in 0 until itemCount) { "Current index is out of range" }
-    require(randomOffset in 0 until (itemCount - 1)) { "Random offset is out of range" }
-    return if (randomOffset >= currentIndex) randomOffset + 1 else randomOffset
-}
 
 internal fun playbackNeighborIndex(
     playbackIndices: List<Int>,

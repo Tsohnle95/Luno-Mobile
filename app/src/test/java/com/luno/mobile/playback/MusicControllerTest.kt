@@ -108,19 +108,6 @@ class MusicControllerTest {
     }
 
     @Test
-    fun `random current replacement maps every eligible item exactly once`() {
-        val mapped = (0 until 4).map { offset ->
-            randomIndexExcludingCurrent(
-                itemCount = 5,
-                currentIndex = 2,
-                randomOffset = offset
-            )
-        }
-
-        assertThat(mapped).containsExactly(0, 1, 3, 4).inOrder()
-    }
-
-    @Test
     fun `playback neighbor follows playback order and stops at its edges`() {
         val playbackOrder = listOf(2, 0, 1)
 
@@ -711,6 +698,52 @@ class MusicControllerTest {
     fun `setShuffle does not throw before connection`() {
         controller.setShuffle(true)
         controller.setShuffle(false)
+    }
+
+    @Test
+    fun `shuffle toggle adjusts the queue without starting playback`() {
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        val uris = listOf("file:///cue-a.m4a", "file:///cue-b.m4a", "file:///cue-c.m4a")
+        player.setMediaItems(uris.map { uri ->
+            MediaItem.Builder().setMediaId(uri).setUri(uri).build()
+        })
+        player.playWhenReady = false
+        player.prepare()
+        val connectedController = MusicController(
+            context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            }
+        )
+
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            player.playWhenReady = false
+            shadowOf(Looper.getMainLooper()).idle()
+            val indexBefore = player.currentMediaItemIndex
+
+            connectedController.setShuffle(true)
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(connectedController.shuffleEnabled.value).isTrue()
+            assertThat(player.shuffleModeEnabled).isTrue()
+            assertThat(player.playWhenReady).isFalse()
+            assertThat(player.currentMediaItemIndex).isEqualTo(indexBefore)
+            assertThat(player.mediaItemCount).isEqualTo(uris.size)
+
+            connectedController.setShuffle(false)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.shuffleModeEnabled).isFalse()
+            assertThat(player.playWhenReady).isFalse()
+            assertThat(player.currentMediaItemIndex).isEqualTo(indexBefore)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
     }
 
     @Test

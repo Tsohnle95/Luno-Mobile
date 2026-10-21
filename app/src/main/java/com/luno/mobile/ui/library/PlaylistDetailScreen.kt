@@ -303,10 +303,7 @@ fun PlaylistDetailScreen(
                         )
                     },
                     onShuffleAll = {
-                        musicController.playShuffled(
-                            displayedTracks.map { it.toMediaTrack(playbackSource) },
-                            playbackPlaylistId
-                        )
+                        musicController.toggleShuffle()
                     },
                     onSearch = { showSearch = !showSearch },
                     searchVisible = showSearch,

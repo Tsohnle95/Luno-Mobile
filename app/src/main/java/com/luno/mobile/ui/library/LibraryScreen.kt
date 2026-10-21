@@ -131,16 +131,14 @@ fun LibraryScreen(
         playlistsWithTracks
     } else {
         playlistsWithTracks.filter {
-            it.playlist.name.contains(query, ignoreCase = true)
+            matchesSearchQuery(query, it.playlist.name)
         }
     }
     val filteredTracks = if (query.isBlank()) {
         allTracks
     } else {
         allTracks.filter {
-            it.title.contains(query, ignoreCase = true) ||
-                it.artist.contains(query, ignoreCase = true) ||
-                it.album.contains(query, ignoreCase = true)
+            matchesSearchQuery(query, it.title, it.artist, it.album)
         }
     }
 
@@ -162,7 +160,7 @@ fun LibraryScreen(
             tracks = allTracks.filter { it.isFavorite }
         )
         val includeFavorites = query.isBlank() ||
-            favoritePlaylist.playlist.name.contains(query, ignoreCase = true)
+            matchesSearchQuery(query, favoritePlaylist.playlist.name)
         buildList {
             if (includeFavorites) add(favoritePlaylist)
             // Keep the reserved root-level playlist below Favorites and above

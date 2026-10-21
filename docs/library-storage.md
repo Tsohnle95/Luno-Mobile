@@ -82,7 +82,10 @@ artwork remains upright.
 The initial view is Playlists; direct Songs/Playlists tabs retain
 saveable view state and clear selection only when the view actually changes.
 Search has the underline treatment from concept 05; search and sort use the
-existing projections and shared `TrackSortMode` modes. Header counts include
+existing projections and shared `TrackSortMode` modes. Library and in-playlist
+search trim surrounding whitespace before matching, so a trailing space (for
+example "Swimming ") does not hide a valid song; a whitespace-only query matches
+everything. Header counts include
 the virtual Favorites playlist, consistently with the list.
 
 [PlaylistCard](../app/src/main/java/com/luno/mobile/ui/components/PlaylistCard.kt)
@@ -130,6 +133,7 @@ Rendering is in `ui/components/ArtworkImage.kt`, `ArtworkCollage.kt` and
   [MusicFolderRepositoryTest](../app/src/test/java/com/luno/mobile/data/repository/MusicFolderRepositoryTest.kt),
   [PlaylistRepositoryTest](../app/src/test/java/com/luno/mobile/data/repository/PlaylistRepositoryTest.kt),
   [PlaylistAddMessageTest](../app/src/test/java/com/luno/mobile/ui/components/PlaylistAddMessageTest.kt),
+  [LibrarySearchTest](../app/src/test/java/com/luno/mobile/ui/library/LibrarySearchTest.kt),
   [DuplicateFinderTest](../app/src/test/java/com/luno/mobile/data/repository/DuplicateFinderTest.kt).
 - [TrackDaoTest](../app/src/test/java/com/luno/mobile/data/db/TrackDaoTest.kt),
   [PlaylistDaoTest](../app/src/test/java/com/luno/mobile/data/db/PlaylistDaoTest.kt).

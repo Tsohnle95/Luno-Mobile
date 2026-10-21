@@ -175,11 +175,8 @@ fun PlaylistDetailScreen(
     // (case-insensitive), then sort the filtered set — the list rows AND
     // the play context walk the same filtered order.
     val filteredTracks = remember(tracks, query) {
-        if (query.isBlank()) tracks
-        else tracks.filter {
-            it.title.contains(query, ignoreCase = true) ||
-                it.artist.contains(query, ignoreCase = true) ||
-                it.album.contains(query, ignoreCase = true)
+        tracks.filter {
+            matchesSearchQuery(query, it.title, it.artist, it.album)
         }
     }
     val sortedTracks = remember(filteredTracks, sortMode, membershipOrder) {
@@ -372,7 +369,7 @@ fun PlaylistDetailScreen(
             if (filteredTracks.isEmpty()) {
                 item {
                     Text(
-                        text = "No songs match \"$query\" in this playlist.",
+                        text = "No songs match \"${query.trim()}\" in this playlist.",
                         color = SecondaryText,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(Dimens.paddingLarge)

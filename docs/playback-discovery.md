@@ -61,7 +61,9 @@ Its app scope survives navigation, not process death. Startup deletes temporary
 preview cache; prepared assets are not library tracks until explicitly saved.
 Resolution uses [download/extraction adapters](downloads.md) and bounded waits;
 waiting/resolving/preparing/ready/failure and saving/queued/permanent states
-must remain distinct.
+must remain distinct. Session teardown preserves per-item failures: a timed-out
+or failed sole preview must remain a visible retryable outcome instead of being
+erased by the cleanup state reset.
 
 When Discover is enabled on a normal track, capture the physical queue and keep
 only the current item in Media3 until a recommendation is prepared. This prevents
@@ -95,7 +97,8 @@ actual durable completion. See [cross-boundary routes](../project_brain.md).
   item while a deferred context is prepared.
 - [RecommendationPreviewManagerTest](../app/src/test/java/com/luno/mobile/playback/RecommendationPreviewManagerTest.kt):
   handoff/session Next/page load, windows, prepared retention/back navigation,
-  save deduplication/completion, timeout spinner clearing, Discover queue fencing
+  save deduplication/completion, timeout spinner clearing and failure retention
+  through session cleanup, Discover queue fencing
   under Repeat All and full queue restoration around the still-playing seed, and
   resuming a deferred preview after natural end without overriding a newer play.
 - [FullPlayerRecommendationStatusTest](../app/src/test/java/com/luno/mobile/ui/player/FullPlayerRecommendationStatusTest.kt):

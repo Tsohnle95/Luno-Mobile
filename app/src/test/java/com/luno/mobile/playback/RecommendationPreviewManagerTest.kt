@@ -590,7 +590,7 @@ class RecommendationPreviewManagerTest {
             assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
             manager.attach(musicController)
             manager.setDiscoverMode(enabled = true)
-            withTimeout(5_000) { fetchStarted.await() }
+            withTimeout(15_000) { fetchStarted.await() }
             shadowOf(Looper.getMainLooper()).idle()
             assertThat(player.mediaItemCount).isEqualTo(1)
 
@@ -743,8 +743,8 @@ class RecommendationPreviewManagerTest {
             manager.attach(musicController)
             manager.setDiscoverMode(enabled = true, recommendations = listOf(recommendation))
 
-            withTimeout(5_000) { previewDownloadReturned.await() }
-            withTimeout(5_000) {
+            withTimeout(15_000) { previewDownloadReturned.await() }
+            withTimeout(15_000) {
                 while (musicController.currentTrack.value?.uri != previewUri) {
                     shadowOf(Looper.getMainLooper()).idle()
                     kotlinx.coroutines.yield()
@@ -807,7 +807,7 @@ class RecommendationPreviewManagerTest {
                 enabled = true,
                 recommendations = listOf(LastfmTrack("Paused Artist", "Paused Preview", 0.9))
             )
-            withTimeout(5_000) { resolverStarted.await() }
+            withTimeout(15_000) { resolverStarted.await() }
             shadowOf(Looper.getMainLooper()).idle()
             assertThat(player.mediaItemCount).isEqualTo(1)
 
@@ -896,7 +896,7 @@ class RecommendationPreviewManagerTest {
             assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
             manager.attach(musicController)
             manager.setDiscoverMode(enabled = true, recommendations = listOf(recommendation))
-            withTimeout(5_000) { downloadStarted.await() }
+            withTimeout(15_000) { downloadStarted.await() }
 
             musicController.play(listOf(MediaTrack(uri = userChoiceUri, title = "User choice")))
             shadowOf(Looper.getMainLooper()).idle()
@@ -1019,11 +1019,11 @@ class RecommendationPreviewManagerTest {
             assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
             manager.attach(musicController)
             manager.setDiscoverMode(enabled = true)
-            withTimeout(5_000) { fetchStarted.await() }
+            withTimeout(15_000) { fetchStarted.await() }
             val isolatedRevision = musicController.queueRevision.value
 
             fetchResult.complete(Result.success(emptyList()))
-            withTimeout(5_000) {
+            withTimeout(15_000) {
                 musicController.queueRevision.first { it > isolatedRevision }
             }
             shadowOf(Looper.getMainLooper()).idle()

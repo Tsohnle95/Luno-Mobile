@@ -61,31 +61,6 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
 
-      - name: Capture release failure diagnostics
-        if: failure()
-        run: |
-          {
-            echo "tag=$GITHUB_REF_NAME"
-            echo "===== RELEASE APK ====="
-            ls -l app/build/outputs/apk/release/ 2>&1
-            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose \
-              app/build/outputs/apk/release/app-release.apk 2>&1
-            echo "===== FAILING TEST REPORTS ====="
-            for report in app/build/test-results/testDebugUnitTest/*.xml; do
-              if grep -q "<failure" "$report"; then
-                echo "--- $report"
-                cat "$report"
-              fi
-            done
-            echo "===== LINT REPORT ====="
-            cat app/build/reports/lint-results-debug.txt 2>/dev/null
-          } > release-failure.txt
-          git config user.name "Release diagnostic"
-          git config user.email "ci@example.invalid"
-          git add release-failure.txt
-          git commit -m "Record release failure"
-          git push --force origin HEAD:release-diagnostic
-
       - name: Name release artifact
         run: cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Luno-Mobile-${GITHUB_REF_NAME}.apk"
 

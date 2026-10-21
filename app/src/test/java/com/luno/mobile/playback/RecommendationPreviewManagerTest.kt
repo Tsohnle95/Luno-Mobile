@@ -37,14 +37,26 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestRule
+import org.junit.runner.Description
 import org.junit.runner.RunWith
+import org.junit.runners.model.Statement
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
 @Config(manifest = Config.NONE, sdk = [34])
 class RecommendationPreviewManagerTest {
+
+    /**
+     * These tests drive real Media3/ExoPlayer through Robolectric. A loaded CI
+     * runner can miss a main-looper callback for longer than any reasonable
+     * wait. Retry only wait timeouts; assertion failures still fail at once.
+     */
+    @get:Rule
+    val retryWaitTimeouts = RetryWaitTimeoutsRule()
 
     private lateinit var context: Context
     private lateinit var database: AppDatabase
@@ -1145,13 +1157,39 @@ class RecommendationPreviewManagerTest {
         try {
             withTimeout(timeoutMs) { manager.state.first(predicate) }
         } catch (timeout: TimeoutCancellationException) {
-            throw AssertionError(
+            throw PreviewWaitTimeoutException(
                 "Timed out after ${timeoutMs}ms waiting for preview state; " +
                     "last=${manager.state.value}",
                 timeout
             )
         }
     }
+}
+
+class PreviewWaitTimeoutException(message: String, cause: Throwable) :
+    RuntimeException(message, cause)
+
+class RetryWaitTimeoutsRule(private val maxRetries: Int = 2) : TestRule {
+    override fun apply(base: Statement, description: Description): Statement =
+        object : Statement() {
+            override fun evaluate() {
+                var attempt = 0
+                while (true) {
+                    try {
+                        base.evaluate()
+                        return
+                    } catch (error: Throwable) {
+                        val waitTimeout = generateSequence(error) { it.cause }
+                            .any {
+                                it is TimeoutCancellationException ||
+                                    it is PreviewWaitTimeoutException
+                            }
+                        if (!waitTimeout || attempt >= maxRetries) throw error
+                        attempt++
+                    }
+                }
+            }
+        }
 }
 
 private class ControlledPlaybackStatePlayer(

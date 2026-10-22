@@ -89,6 +89,18 @@ class LunoApp : Application(), Configuration.Provider {
      */
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    val temporaryVideoManager by lazy {
+        val preferences = getSharedPreferences("temporary_video_mode", MODE_PRIVATE)
+        com.luno.mobile.playback.TemporaryVideoManager(
+            File(cacheDir, "song-videos"), appScope,
+            com.luno.mobile.playback.YouTubeVideoResolver(this),
+            com.luno.mobile.playback.Mp4VideoDownloader(),
+            initiallyEnabled = preferences.getBoolean("enabled", false),
+            persistEnabled = { preferences.edit().putBoolean("enabled", it).apply() },
+            diagnostics = { android.util.Log.d("LunoVideo", it) }
+        )
+    }
+
     val appUpdateManager by lazy { com.luno.mobile.data.update.AppUpdateManager(this, appScope) }
 
     fun setMadeForYouTracks(tracks: List<Track>) {

@@ -43,7 +43,7 @@ independent state/contracts/lifecycle and recurring routing value warrant it.
 ## Architecture and data flow
 
 `LunoApp` owns application-scoped repositories, eagerly observed `LibraryData`,
-import/artwork managers, recommendation previews, the app update manager and its process-lifetime
+import/artwork managers, recommendation previews, temporary song-video staging, the app update manager and its process-lifetime
 `SupervisorJob` scope. It initializes Room, NewPipe and WorkManager configuration,
 starts download reconciliation/repair, and captures uncaught crashes locally.
 `MainActivity` creates/attaches/releases `MusicController`; `MusicService`

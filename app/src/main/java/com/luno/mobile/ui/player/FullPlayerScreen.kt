@@ -6,9 +6,11 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,14 +29,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PauseCircle
-import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Favorite
@@ -42,12 +43,15 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Badge
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,6 +70,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
@@ -86,11 +91,10 @@ import com.luno.mobile.playback.RecommendationSaveOutcome
 import com.luno.mobile.ui.components.PlaylistPickerSheet
 import com.luno.mobile.ui.components.ArtworkImage
 import com.luno.mobile.ui.components.RecommendationArtworkImage
-import com.luno.mobile.ui.components.rememberArtworkColors
 import com.luno.mobile.ui.create.CreatePlaylistSheet
 import com.luno.mobile.ui.theme.AccentGreen
+import com.luno.mobile.ui.theme.PlayerPurple
 import com.luno.mobile.ui.theme.Dimens
-import com.luno.mobile.ui.theme.MiniPlayerBorder
 import com.luno.mobile.ui.theme.PrimaryBackground
 import com.luno.mobile.ui.theme.PrimaryText
 import com.luno.mobile.ui.theme.SecondaryText
@@ -129,12 +133,12 @@ private fun recommendationKey(track: LastfmTrack): String =
     RecommendationPreviewManager.recommendationKey(track)
 
 /**
- * Full-screen player: large artwork (real embedded artwork with a
- * dominant-color gradient backdrop), title/artist, scrub bar with m:ss
- * time labels, transport row (shuffle / previous / play-pause / next /
+ * Full-screen player: viewport-height fading artwork, title/artist and
+ * scrub bar with m:ss time labels, transport row (shuffle / previous / play-pause / next /
  * repeat), queue/action-sheet triggers, and a scrollable recommendation
  * section seeded from the current track.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullPlayerScreen(
     musicController: MusicController,
@@ -150,6 +154,7 @@ fun FullPlayerScreen(
     val context = LocalContext.current
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val app = context.applicationContext as LunoApp
+    val videoState by app.temporaryVideoManager.state.collectAsState()
     fun skipToNext() = app.recommendationPreviewManager.skipToNext()
     val apiKey by app.discoveryRepository.apiKey.collectAsState()
     val allTracks by app.libraryData.tracks.collectAsState()
@@ -170,6 +175,13 @@ fun FullPlayerScreen(
     val recommendationScope = rememberCoroutineScope()
     val playerListState = rememberLazyListState()
     var scrollRestorePosition by remember { mutableStateOf<FullPlayerScrollPosition?>(null) }
+    LaunchedEffect(isLandscape) {
+        if (isLandscape) {
+            // A saved portrait scroll offset must not crop the initial full-screen stage.
+            scrollRestorePosition = null
+            playerListState.scrollToItem(0)
+        }
+    }
     val currentLibraryTrack = remember(allTracks, currentTrack?.uri) {
         currentTrack?.uri?.let { uri -> allTracks.firstOrNull { it.uri == uri } }
     }
@@ -200,7 +212,6 @@ fun FullPlayerScreen(
     } else {
         currentTrack?.uri
     }
-    val showRecommendationScrollHint = recommendationSeedUri != null && !apiKey.isNullOrBlank()
 
     LaunchedEffect(
         recommendationSeedUri,
@@ -294,7 +305,6 @@ fun FullPlayerScreen(
     } else {
         effectiveArtist
     } ?: "Unknown Artist"
-    val sourceLabel = currentTrack?.playbackSource?.displayLabel()
     val pendingArtworkUri = selectedRecommendation?.let { recommendation ->
         fallbackArtwork[recommendationKey(recommendation)] ?: recommendation.imageUrl
     }
@@ -307,7 +317,6 @@ fun FullPlayerScreen(
     } else {
         artworkUri
     }
-    val (gradientTop, gradientBottom) = rememberArtworkColors(displayArtworkUri)
 
     fun requestFallbackArtwork(track: LastfmTrack) {
         val key = recommendationKey(track)
@@ -514,398 +523,298 @@ fun FullPlayerScreen(
         )
     }
 
-    if (isLandscape) {
-        LandscapeArtworkPlayer(
-            artworkUri = displayArtworkUri,
-            title = displayTitle,
-            artist = displayArtist,
-            isPlaying = playWhenReady,
-            onBack = onBack,
-            onPrevious = musicController::skipToPrevious,
-            onPlayPause = musicController::togglePlayPause,
-            onNext = ::skipToNext
-        )
-        return
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(gradientTop, gradientBottom, PrimaryBackground)
-                )
-            )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = Dimens.paddingLarge),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Top bar: back arrow, queue, favorite, action sheet
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = Dimens.paddingSmall),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = PrimaryText,
-                        modifier = Modifier.size(Dimens.iconSize)
-                    )
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = { showQueueSheet = true }) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.QueueMusic,
-                        contentDescription = "Queue",
-                        tint = PrimaryText,
-                        modifier = Modifier.size(Dimens.iconSize)
-                    )
-                }
-                IconButton(
-                    onClick = {
-                        val track = currentLibraryTrack ?: return@IconButton
-                        val updatedFavorite = !track.isFavorite
-                        app.appScope.launch {
-                            app.libraryRepository.setFavorite(track.uri, updatedFavorite)
-                        }
-                    },
-                    enabled = canFavorite
-                ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = if (isFavorite) {
-                            "Remove from favorites"
-                        } else {
-                            "Add to favorites"
-                        },
-                        tint = if (isFavorite) AccentGreen else PrimaryText,
-                        modifier = Modifier.size(Dimens.iconSize)
-                    )
-                }
-                IconButton(onClick = { showActionSheet = true }) {
-                    Icon(
-                        imageVector = Icons.Filled.MoreVert,
-                        contentDescription = "More options",
-                        tint = PrimaryText,
-                        modifier = Modifier.size(Dimens.iconSize)
-                    )
-                }
-            }
-
-            // Keep the artwork gradient on the viewport while this content
-            // list moves over it.
+    BoxWithConstraints(Modifier.fillMaxSize().background(PrimaryBackground)) {
+        val playerViewportHeight = maxHeight
+        Column(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = playerListState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentPadding = PaddingValues(
-                    top = Dimens.paddingLarge,
-                    bottom = Dimens.paddingXLarge
-                ),
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                contentPadding = PaddingValues(bottom = Dimens.paddingXLarge),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 item(key = "player-controls", contentType = "player-controls") {
-            // Artwork: real embedded artwork, gradient placeholder fallback
-            if (selectedRecommendation != null) {
-                RecommendationArtworkImage(
-                    recommendation = selectedRecommendation,
-                    artworkUri = displayArtworkUri,
-                    modifier = Modifier
-                        .size(Dimens.albumArtLarge)
-                        .clip(RoundedCornerShape(Dimens.cornerMedium)),
-                    placeholderIconSize = 96.dp,
-                    decodeSizePx = 512
-                )
-            } else {
-                RecommendationArtworkImage(
-                    artist = displayArtist,
-                    title = displayTitle,
-                    artworkUri = displayArtworkUri,
-                    modifier = Modifier
-                        .size(Dimens.albumArtLarge)
-                        .clip(RoundedCornerShape(Dimens.cornerMedium)),
-                    placeholderIconSize = 96.dp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(Dimens.paddingXLarge))
-
-            // Title / artist
-            Text(
-                text = displayTitle,
-                style = MaterialTheme.typography.headlineMedium,
-                color = PrimaryText,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(Dimens.paddingMedium))
-            Text(
-                text = displayArtist,
-                style = MaterialTheme.typography.bodyMedium,
-                color = SecondaryText,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                when {
-                    currentTrack?.isTransient == true && sourceLabel != null -> Text(
-                        text = "Temporary preview · $sourceLabel",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = AccentGreen,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center
-                    )
-                    currentTrack?.isTransient == true -> Text(
-                        text = "Temporary preview",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = AccentGreen
-                    )
-                    sourceLabel != null -> Text(
-                        text = "From $sourceLabel",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = AccentGreen,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(Dimens.paddingLarge))
-
-            // Scrub bar with m:ss time labels
-            val maxDuration = duration.coerceAtLeast(0L).toFloat()
-            var sliderPosition by rememberSaveable(currentTrack?.uri) {
-                mutableStateOf(0f)
-            }
-            var isScrubbing by rememberSaveable(currentTrack?.uri) {
-                mutableStateOf(false)
-            }
-            val progressTarget = progress.toFloat().coerceIn(0f, maxDuration)
-            // The controller samples Media3 every 250 ms. Interpolate those
-            // samples locally so the thumb and elapsed time move every frame
-            // instead of visibly stepping between controller updates.
-            val animatedProgress = key(currentTrack?.uri) {
-                val value by animateFloatAsState(
-                    targetValue = progressTarget,
-                    animationSpec = tween(
-                        durationMillis = PROGRESS_SAMPLE_INTERVAL_MS,
-                        easing = LinearEasing
-                    ),
-                    label = "playbackProgress"
-                )
-                value
-            }
-            val scrubValue = if (isScrubbing) sliderPosition else animatedProgress
-            Slider(
-                value = scrubValue,
-                onValueChange = {
-                    sliderPosition = it
-                    isScrubbing = true
-                },
-                onValueChangeFinished = {
-                    musicController.seekTo(sliderPosition.toLong())
-                    isScrubbing = false
-                },
-                valueRange = 0f..maxDuration.coerceAtLeast(1f),
-                colors = SliderDefaults.colors(
-                    thumbColor = AccentGreen,
-                    activeTrackColor = AccentGreen,
-                    inactiveTrackColor = MiniPlayerBorder
-                )
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = formatTime(scrubValue.toLong()),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SecondaryText
-                )
-                Text(
-                    text = formatTime(duration.coerceAtLeast(0L)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SecondaryText
-                )
-            }
-
-            Spacer(modifier = Modifier.height(Dimens.paddingLarge))
-
-            // Transport row: shuffle, previous, play/pause, next, repeat
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(
-                        onClick = { musicController.toggleShuffle() },
-                        modifier = Modifier.size(Dimens.touchTargetMin)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Shuffle,
-                            contentDescription = "Shuffle",
-                            tint = if (shuffleEnabled) AccentGreen else SecondaryText,
-                            modifier = Modifier.size(Dimens.iconSizeSmall)
-                        )
-                    }
-                    if (shuffleEnabled) {
-                        Box(
-                            modifier = Modifier
-                                .width(Dimens.iconSizeSmall)
-                                .height(2.dp)
-                                .background(AccentGreen)
-                        )
-                    }
-                }
-                IconButton(
-                    onClick = {
-                        // Only a transient preview playing needs the manager's
-                        // skip routing; for any normal track the player's own
-                        // skip always advances the queue (into a queued
-                        // recommendation block or past it).
-                        if (currentTrack?.isTransient != true ||
-                            !app.recommendationPreviewManager.skipToPrevious()
-                        ) {
-                            musicController.skipToPrevious()
-                        }
-                    },
-                    modifier = Modifier.size(Dimens.touchTargetMin)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.SkipPrevious,
-                        contentDescription = "Previous",
-                        tint = PrimaryText,
-                        modifier = Modifier.size(Dimens.iconSizeMedium)
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .clickable { musicController.togglePlayPause() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (playWhenReady) {
-                            Icons.Filled.PauseCircle
-                        } else {
-                            Icons.Filled.PlayCircle
-                        },
-                        contentDescription = if (playWhenReady) "Pause" else "Play",
-                        tint = PrimaryText,
-                        modifier = Modifier.size(56.dp)
-                    )
-                }
-                IconButton(
-                    onClick = ::skipToNext,
-                    modifier = Modifier.size(Dimens.touchTargetMin)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.SkipNext,
-                        contentDescription = "Next",
-                        tint = PrimaryText,
-                        modifier = Modifier.size(Dimens.iconSizeMedium)
-                    )
-                }
-                IconButton(
-                    onClick = { musicController.toggleRepeatMode() },
-                    modifier = Modifier.size(Dimens.touchTargetMin)
-                ) {
-                    Box {
-                        Icon(
-                            imageVector = Icons.Filled.Repeat,
-                            contentDescription = "Repeat",
-                            tint = if (repeatMode != Player.REPEAT_MODE_OFF) {
-                                AccentGreen
-                            } else {
-                                SecondaryText
-                            },
-                            modifier = Modifier.size(Dimens.iconSizeSmall)
-                        )
-                        if (repeatMode == Player.REPEAT_MODE_ONE) {
-                            Badge(
-                                containerColor = AccentGreen,
-                                contentColor = PrimaryBackground,
-                                modifier = Modifier.align(Alignment.TopEnd)
-                            ) {
-                                Text(
-                                    text = "1",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
+                    ResponsivePlayerStage(
+                        viewportHeight = playerViewportHeight,
+                        landscape = isLandscape,
+                        artwork = { artworkModifier ->
+                            Box(artworkModifier) {
+                            val videoReplacesArtwork = videoState.enabled &&
+                                videoState.trackUri == currentTrack?.uri &&
+                                videoState.status == com.luno.mobile.playback.TemporaryVideoStatus.READY &&
+                                videoState.file != null
+                            if (!videoReplacesArtwork) RecommendationArtworkImage(
+                                artist = displayArtist,
+                                title = displayTitle,
+                                artworkUri = displayArtworkUri,
+                                modifier = Modifier.fillMaxSize(),
+                                shape = RectangleShape,
+                                placeholderIconSize = 96.dp,
+                                decodeSizePx = 1024
+                            )
+                            TemporaryVideoSurface(
+                                state = videoState,
+                                trackUri = currentTrack?.uri,
+                                audioPositionMs = progress,
+                                audioPlaying = isPlaying,
+                                modifier = Modifier.fillMaxSize(),
+                                onRetry = app.temporaryVideoManager::retry,
+                                onDecoderError = app.temporaryVideoManager::reportDecoderError
+                            )
+                            if (!isLandscape) Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
+                                0f to Color.Black.copy(alpha = 0.12f),
+                                0.55f to Color.Transparent,
+                                0.83f to PrimaryBackground.copy(alpha = 0.55f),
+                                1f to PrimaryBackground
+                            )))
                             }
-                        }
-                    }
-                }
-                }
+                        },
+                        controls = {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f).clickable(onClickLabel = "Song options") {
+                                    showActionSheet = true
+                                }) {
+                                    Text(displayTitle, style = MaterialTheme.typography.titleLarge,
+                                        color = PrimaryText, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(displayArtist, style = MaterialTheme.typography.bodyMedium,
+                                        color = SecondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                IconButton(onClick = { showQueueSheet = true }) {
+                                    Icon(Icons.AutoMirrored.Filled.QueueMusic, "Queue", tint = PrimaryText,
+                                        modifier = Modifier.size(22.dp))
+                                }
+                                IconButton(onClick = {
+                                    val track = currentLibraryTrack ?: return@IconButton
+                                    app.appScope.launch { app.libraryRepository.toggleFavorite(track.uri) }
+                                }, enabled = canFavorite) {
+                                    Icon(if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                        if (isFavorite) "Remove from favorites" else "Add to favorites",
+                                        tint = PrimaryText, modifier = Modifier.size(22.dp))
+                                }
+                                IconButton(onClick = { showActionSheet = true }) {
+                                    Icon(Icons.Filled.MoreHoriz, "More options", tint = PrimaryText,
+                                        modifier = Modifier.size(22.dp))
+                                }
+                            }
+                            if (currentTrack?.isTransient == true) {
+                                Text("Temporary preview", style = MaterialTheme.typography.labelSmall,
+                                    color = SecondaryText)
+                            }
 
-                if (currentTrack != null) {
-                    TextButton(
-                        onClick = {
-                            preservePlayerScrollPosition()
-                            app.recommendationPreviewManager.setDiscoverMode(
-                                enabled = !discoverMode,
-                                recommendations = if (discoverMode) {
-                                    emptyList()
-                                } else {
-                                    readyRecommendations
+                            // Scrub bar with m:ss time labels
+                            val maxDuration = duration.coerceAtLeast(0L).toFloat()
+                            var sliderPosition by rememberSaveable(currentTrack?.uri) {
+                                mutableStateOf(0f)
+                            }
+                            var isScrubbing by rememberSaveable(currentTrack?.uri) {
+                                mutableStateOf(false)
+                            }
+                            val progressTarget = progress.toFloat().coerceIn(0f, maxDuration)
+                            // The controller samples Media3 every 250 ms. Interpolate those
+                            // samples locally so the thumb and elapsed time move every frame
+                            // instead of visibly stepping between controller updates.
+                            val animatedProgress = key(currentTrack?.uri) {
+                                val value by animateFloatAsState(
+                                    targetValue = progressTarget,
+                                    animationSpec = tween(
+                                        durationMillis = PROGRESS_SAMPLE_INTERVAL_MS,
+                                        easing = LinearEasing
+                                    ),
+                                    label = "playbackProgress"
+                                )
+                                value
+                            }
+                            val scrubValue = if (isScrubbing) sliderPosition else animatedProgress
+                            Slider(
+                                value = scrubValue,
+                                onValueChange = {
+                                    sliderPosition = it
+                                    isScrubbing = true
+                                },
+                                onValueChangeFinished = {
+                                    musicController.seekTo(sliderPosition.toLong())
+                                    isScrubbing = false
+                                },
+                                valueRange = 0f..maxDuration.coerceAtLeast(1f),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color.White,
+                                    activeTrackColor = Color.White,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.30f)
+                                ),
+                                // The track draws the thumb using the same center as its line.
+                                thumb = { Box(Modifier.size(10.dp)) },
+                                track = { state ->
+                                    Canvas(Modifier.fillMaxWidth().height(10.dp)) {
+                                        val fraction = (state.value / state.valueRange.endInclusive.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                        val middle = size.height / 2f
+                                        drawLine(Color.White.copy(alpha = 0.30f), Offset(0f, middle), Offset(size.width, middle), 2.dp.toPx())
+                                        drawLine(Color.White, Offset(0f, middle), Offset(size.width * fraction, middle), 2.dp.toPx())
+                                        drawCircle(Color.White, radius = 5.dp.toPx(), center = Offset(size.width * fraction, middle))
+                                    }
                                 }
                             )
-                        },
-                        enabled = discoverMode || !apiKey.isNullOrBlank()
-                    ) {
-                        Text(
-                            text = if (discoverMode) {
-                                "Discover mode: On"
-                            } else {
-                                "Start discover mode"
-                            },
-                            color = if (discoverMode) AccentGreen else SecondaryText
-                        )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = formatTime(scrubValue.toLong()),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = SecondaryText
+                                )
+                                Text(
+                                    text = formatTime(duration.coerceAtLeast(0L)),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = SecondaryText
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Transport row: repeat, previous, play/pause, next, shuffle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = { musicController.toggleRepeatMode() },
+                                    modifier = Modifier.size(Dimens.touchTargetMin)
+                                ) {
+                                    Box {
+                                        Icon(
+                                            imageVector = Icons.Filled.Repeat,
+                                            contentDescription = "Repeat",
+                                            tint = if (repeatMode != Player.REPEAT_MODE_OFF) {
+                                                PlayerPurple
+                                            } else {
+                                                PrimaryText
+                                            },
+                                            modifier = Modifier.size(Dimens.iconSizeSmall)
+                                        )
+                                        if (repeatMode == Player.REPEAT_MODE_ONE) {
+                                            Badge(
+                                                containerColor = PlayerPurple,
+                                                contentColor = PrimaryBackground,
+                                                modifier = Modifier.align(Alignment.TopEnd)
+                                            ) {
+                                                Text(
+                                                    text = "1",
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                IconButton(
+                                    onClick = {
+                                        // Only a transient preview playing needs the manager's
+                                        // skip routing; for any normal track the player's own
+                                        // skip always advances the queue (into a queued
+                                        // recommendation block or past it).
+                                        if (currentTrack?.isTransient != true ||
+                                            !app.recommendationPreviewManager.skipToPrevious()
+                                        ) {
+                                            musicController.skipToPrevious()
+                                        }
+                                    },
+                                    modifier = Modifier.size(Dimens.touchTargetMin)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.SkipPrevious,
+                                        contentDescription = "Previous",
+                                        tint = PrimaryText,
+                                        modifier = Modifier.size(Dimens.iconSizeMedium)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(PlayerPurple)
+                                        .clickable { musicController.togglePlayPause() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (playWhenReady) {
+                                            Icons.Filled.Pause
+                                        } else {
+                                            Icons.Filled.PlayArrow
+                                        },
+                                        contentDescription = if (playWhenReady) "Pause" else "Play",
+                                        tint = PrimaryText,
+                                        modifier = Modifier.size(27.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = ::skipToNext,
+                                    modifier = Modifier.size(Dimens.touchTargetMin)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.SkipNext,
+                                        contentDescription = "Next",
+                                        tint = PrimaryText,
+                                        modifier = Modifier.size(Dimens.iconSizeMedium)
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    IconButton(
+                                        onClick = { musicController.toggleShuffle() },
+                                        modifier = Modifier.size(Dimens.touchTargetMin)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Shuffle,
+                                            contentDescription = "Shuffle",
+                                            tint = if (shuffleEnabled) PlayerPurple else PrimaryText,
+                                            modifier = Modifier.size(Dimens.iconSizeSmall)
+                                        )
+                                    }
+                                    if (shuffleEnabled) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(Dimens.iconSizeSmall)
+                                                .height(2.dp)
+                                                .background(PlayerPurple)
+                                        )
+                                    }
+                                }
+                            }
+
+
+                        }
+                        }
+                    )
+                }
+                item(key = "discover-mode", contentType = "discover-mode") {
+                    if (currentTrack != null) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Discover mode", style = MaterialTheme.typography.titleMedium,
+                                color = PrimaryText, modifier = Modifier.weight(1f))
+                            Text(if (discoverMode) "On" else "Off", color = SecondaryText,
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(end = 8.dp))
+                            Switch(
+                                checked = discoverMode,
+                                onCheckedChange = { enabled ->
+                                    preservePlayerScrollPosition()
+                                    app.recommendationPreviewManager.setDiscoverMode(
+                                        enabled = enabled,
+                                        recommendations = if (enabled) readyRecommendations else emptyList()
+                                    )
+                                },
+                                enabled = discoverMode || !apiKey.isNullOrBlank(),
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = PlayerPurple,
+                                    checkedThumbColor = Color.White
+                                )
+                            )
+                        }
                     }
                 }
-
-                if (showRecommendationScrollHint) {
-                    // Cue, then the recommendation section starts ~1-2 rem
-                    // below it — no viewport-filling gap.
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Dimens.paddingLarge)
-                            .padding(bottom = Dimens.paddingLarge),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.KeyboardArrowDown,
-                            contentDescription = "Scroll down for recommendations",
-                            tint = AccentGreen,
-                            modifier = Modifier.size(Dimens.iconSizeMedium)
-                        )
-                        Text(
-                            text = "Scroll for recommendations",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = SecondaryText
-                        )
-                    }
-                }
-
-            }
             fullPlayerRecommendations(
                 seedUri = recommendationSeedUri,
                 apiKeyConfigured = !apiKey.isNullOrBlank(),
@@ -981,86 +890,6 @@ fun FullPlayerScreen(
         }
 }
 
-@Composable
-private fun LandscapeArtworkPlayer(
-    artworkUri: String?,
-    title: String,
-    artist: String,
-    isPlaying: Boolean,
-    onBack: () -> Unit,
-    onPrevious: () -> Unit,
-    onPlayPause: () -> Unit,
-    onNext: () -> Unit
-) {
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        ArtworkImage(
-            artworkUri = artworkUri,
-            modifier = Modifier.fillMaxSize(),
-            shape = RectangleShape,
-            placeholderIconSize = 128.dp,
-            decodeSizePx = 1440
-        )
-        Box(
-            modifier = Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color.Black.copy(alpha = 0.28f),
-                        Color.Transparent,
-                        Color.Black.copy(alpha = 0.82f)
-                    )
-                )
-            )
-        )
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier.align(Alignment.TopStart).padding(Dimens.paddingMedium)
-        ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
-        }
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = Dimens.paddingXLarge, vertical = Dimens.paddingLarge),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.headlineSmall,
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                artist,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.8f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Dimens.paddingLarge)
-            ) {
-                IconButton(onClick = onPrevious) {
-                    Icon(Icons.Filled.SkipPrevious, "Previous", tint = Color.White)
-                }
-                IconButton(onClick = onPlayPause, modifier = Modifier.size(64.dp)) {
-                    Icon(
-                        if (isPlaying) Icons.Filled.PauseCircle else Icons.Filled.PlayCircle,
-                        if (isPlaying) "Pause" else "Play",
-                        tint = Color.White,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                IconButton(onClick = onNext) {
-                    Icon(Icons.Filled.SkipNext, "Next", tint = Color.White)
-                }
-            }
-        }
-    }
-}
-
 private fun LazyListScope.fullPlayerRecommendations(
     seedUri: String?,
     apiKeyConfigured: Boolean,
@@ -1091,7 +920,7 @@ private fun LazyListScope.fullPlayerRecommendations(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = Dimens.paddingSmall)
+                .padding(start = 20.dp, end = 20.dp, top = Dimens.paddingSmall)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1281,7 +1110,7 @@ private fun FullPlayerRecommendationRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(Dimens.cornerMedium))
             .clickable(onClick = onPreview)
-            .padding(vertical = Dimens.paddingSmall),
+            .padding(horizontal = 20.dp, vertical = Dimens.paddingSmall),
         verticalAlignment = Alignment.CenterVertically
     ) {
         RecommendationArtworkImage(

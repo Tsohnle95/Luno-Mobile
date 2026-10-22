@@ -27,8 +27,8 @@ android {
         applicationId = "com.luno.mobile"
         minSdk = 29
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.0.16"
+        versionCode = 18
+        versionName = "1.0.17"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -76,6 +76,8 @@ android {
         compose = true
         buildConfig = true
     }
+
+    testOptions.unitTests.isIncludeAndroidResources = true
 
     // Exercise the same language-neutral transfer fixtures as the desktop.
     sourceSets.getByName("test").resources.srcDir(rootProject.file("contracts/library-export/v1"))
@@ -136,6 +138,7 @@ dependencies {
     // Media3
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
+    implementation(libs.media3.ui)
 
     // Coroutines
     implementation(libs.coroutines.core)
@@ -163,6 +166,9 @@ dependencies {
     coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 
     // Testing
+    testImplementation(platform(libs.compose.bom))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation(libs.junit)
     testImplementation(libs.ext.junit)
     testImplementation(libs.robolectric)

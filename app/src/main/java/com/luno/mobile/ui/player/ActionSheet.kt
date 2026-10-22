@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -68,6 +69,7 @@ fun PlayerActionSheet(
     val context = LocalContext.current
     val app = context.applicationContext as LunoApp
     val currentTrack by musicController.currentTrack.collectAsState()
+    val videoState by app.temporaryVideoManager.state.collectAsState()
     val allTracks by app.libraryData.tracks.collectAsState()
     val editableTrack = currentTrack?.uri?.let { uri ->
         allTracks.firstOrNull { it.uri == uri }
@@ -189,6 +191,14 @@ fun PlayerActionSheet(
                     .fillMaxWidth()
                     .padding(horizontal = Dimens.paddingLarge)
             ) {
+                ActionSheetRow(
+                    icon = Icons.Filled.Videocam,
+                    label = if (videoState.enabled) "Turn off video" else "Watch video",
+                    onClick = {
+                        app.temporaryVideoManager.setEnabled(!videoState.enabled)
+                        onDismiss()
+                    }
+                )
                 ActionSheetRow(
                     icon = Icons.AutoMirrored.Filled.PlaylistAdd,
                     label = "Add to playlist",

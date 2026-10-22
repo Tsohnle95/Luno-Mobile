@@ -4,8 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,7 +24,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,8 +47,8 @@ import com.luno.mobile.ui.theme.PrimaryText
 import com.luno.mobile.ui.theme.SecondaryText
 
 /**
- * Library record sleeve: upright artwork, playlist name/count/duration and
- * existing options. The virtual Favorites playlist has its own green heart tile.
+ * Compact library row or cover-grid entry with the same playlist actions.
+ * Favorites remains a virtual collection with no destructive options.
  *
  * [onSync] / [onUrlChanged] / [onDelete] control which items appear in the
  * 3-dot menu; passing only [onClick] yields a plain tappable card.
@@ -69,34 +68,31 @@ fun PlaylistCard(
     modifier: Modifier = Modifier,
     selected: Boolean? = null,
     onLongClick: (() -> Unit)? = null,
-    showOptions: Boolean = true
+    showOptions: Boolean = true,
+    gridView: Boolean = false
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val favorites = playlist.id == SystemPlaylists.FAVORITES_ID
-    val duration = remember(tracks) { tracks.sumOf { it.durationMs } }
 
-    Column(modifier.fillMaxWidth()) {
+    val artwork: @Composable (Modifier) -> Unit = { artworkModifier ->
+        if (favorites) {
+            Box(artworkModifier.clip(RoundedCornerShape(3.dp)).background(Color(0xFF413E9C)),
+                contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Favorite, null, tint = Color.White,
+                    modifier = Modifier.size(if (gridView) 46.dp else 26.dp))
+            }
+        } else {
+            ArtworkCollage(tracks = tracks, modifier = artworkModifier, placeholderIconSize = 20.dp,
+                decodeSizePx = if (gridView) 512 else 192, shape = RoundedCornerShape(3.dp))
+        }
+    }
+    Column(modifier.fillMaxWidth().then(
+        if (onLongClick != null) Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+        else Modifier.clickable(onClick = onClick)
+    )) {
+        if (gridView) artwork(Modifier.fillMaxWidth().aspectRatio(1f))
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .then(
-                    if (onLongClick != null) {
-                        Modifier.combinedClickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onClick,
-                            onLongClick = onLongClick
-                        )
-                    } else {
-                        Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onClick
-                        )
-                    }
-                )
-                .padding(vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (selected != null) {
@@ -113,22 +109,10 @@ fun PlaylistCard(
                 Spacer(modifier = Modifier.width(Dimens.paddingSmall))
             }
 
-            if (favorites) {
-                Box(Modifier.size(88.dp).clip(RoundedCornerShape(8.dp))
-                    .background(AccentGreen.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Favorite, null, tint = AccentGreen, modifier = Modifier.size(40.dp))
-                }
-            } else {
-                ArtworkCollage(
-                    tracks = tracks,
-                    modifier = Modifier.size(88.dp),
-                    placeholderIconSize = 20.dp,
-                    decodeSizePx = 384,
-                    shape = RoundedCornerShape(8.dp)
-                )
+            if (!gridView) {
+                artwork(Modifier.size(54.dp))
+                Spacer(modifier = Modifier.width(12.dp))
             }
-
-            Spacer(modifier = Modifier.width(18.dp))
 
             Column(
                 modifier = Modifier
@@ -136,14 +120,14 @@ fun PlaylistCard(
             ) {
                 Text(
                     text = playlist.name,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = PrimaryText,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(6.dp))
-                Text("${tracks.size} songs · ${formatPlaylistDuration(duration)}",
+                Spacer(Modifier.height(4.dp))
+                Text("${if (favorites) "Saved by you" else "Playlist"} · ${tracks.size} songs",
                     style = MaterialTheme.typography.bodySmall, color = SecondaryText,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -225,7 +209,6 @@ fun PlaylistCard(
                 }
             }
         }
-        HorizontalDivider(color = Color.White.copy(alpha = 0.07f), thickness = 0.5.dp)
 
     }
 }

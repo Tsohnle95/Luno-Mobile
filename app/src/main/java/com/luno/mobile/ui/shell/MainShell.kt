@@ -73,16 +73,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -97,13 +101,13 @@ import com.luno.mobile.playback.MediaTrack
 import com.luno.mobile.playback.MusicController
 import com.luno.mobile.playback.NotificationPermissionPolicy
 import com.luno.mobile.ui.components.MiniPlayer
+import com.luno.mobile.ui.components.PlaylistPickerSheet
+import com.luno.mobile.ui.components.playlistAddMessage
 import com.luno.mobile.ui.create.CreatePlaylistSheet
 import com.luno.mobile.ui.discover.LastfmKeyDialog
-import com.luno.mobile.ui.library.libraryShelfBackground
 import com.luno.mobile.ui.navigation.LunoNavHost
 import com.luno.mobile.ui.navigation.Routes
 import com.luno.mobile.ui.theme.AccentGreen
-import com.luno.mobile.ui.theme.AppBackgroundGreen
 import com.luno.mobile.ui.theme.Dimens
 import com.luno.mobile.ui.theme.NavBarUnselected
 import com.luno.mobile.ui.theme.PrimaryBackground
@@ -149,6 +153,7 @@ fun MainShell(
     val context = LocalContext.current
     val navController = rememberNavController()
     var showCreateSheet by rememberSaveable { mutableStateOf(false) }
+    var miniPlayerPlaylistTrackUri by rememberSaveable { mutableStateOf<String?>(null) }
     // Drawer settings state.
     var showClearHistoryConfirm by remember { mutableStateOf(false) }
     var showLastfmKeyDialog by remember { mutableStateOf(false) }
@@ -223,7 +228,7 @@ fun MainShell(
             }
         }
     }
-    LaunchedEffect(transitionMask) {
+    LaunchedEffect(transitionMask, currentBackStack?.id) {
         if (!transitionMask) return@LaunchedEffect
         val startedAt = SystemClock.elapsedRealtime()
         while (SystemClock.elapsedRealtime() - startedAt < TRANSITION_MASK_HOLD_MS) {
@@ -383,7 +388,7 @@ fun MainShell(
                 if (shuffle) {
                     musicController.playShuffled(tracks)
                 } else {
-                    musicController.play(tracks, startIndex)
+                    musicController.play(tracks, startIndex, shuffle = false)
                 }
             }
         }
@@ -452,16 +457,10 @@ fun MainShell(
         }
     }
 
-    ModalNavigationDrawer(
+    LunoNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = currentRoute != Routes.FULL_PLAYER,
         drawerContent = {
-            ModalDrawerSheet(
-                drawerContainerColor = SurfaceDark,
-                modifier = Modifier
-                    .fillMaxWidth(0.8f)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState())
-            ) {
                 // Drawer header
                 Text(
                     text = "Settings",
@@ -656,25 +655,15 @@ fun MainShell(
                         )
                     }
                 }
-            }
         }
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(PrimaryBackground)
-                // Use one library canvas behind both its content and the
-                // transparent status bar so the green glow stays continuous.
-                .then(
-                    if (currentRoute == Routes.LIBRARY) {
-                        Modifier.libraryShelfBackground()
-                    } else {
-                        Modifier.appBackgroundWash()
-                    }
-                )
         ) {
             Scaffold(
-                // Let the shell wash show through the screen content while
+                // Share the flat shell background through the screen content while
                 // navigation, drawers, and modal surfaces keep their own
                 // opaque contrast-safe colors.
                 containerColor = Color.Transparent,
@@ -698,6 +687,8 @@ fun MainShell(
                                         isFavorite = miniPlayerIsFavorite,
                                         canFavorite = miniPlayerCanFavorite,
                                         onToggleFavorite = ::toggleMiniPlayerFavorite,
+                                        canAddToPlaylist = activeLibraryTrack != null,
+                                        onAddToPlaylist = { miniPlayerPlaylistTrackUri = activeLibraryTrack?.uri },
                                         onMiniPlayerTap = {
                                             transitionMask = true
                                             navController.navigate(Routes.FULL_PLAYER)
@@ -713,7 +704,13 @@ fun MainShell(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(innerPadding)
+                        .padding(
+                            top = if (currentRoute == Routes.FULL_PLAYER || currentRoute == Routes.PLAYLIST_DETAIL) 0.dp
+                                else innerPadding.calculateTopPadding(),
+                            bottom = innerPadding.calculateBottomPadding(),
+                            start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
+                            end = innerPadding.calculateEndPadding(LocalLayoutDirection.current)
+                        )
                 ) {
                     if (!showAppUpdates) {
                         AppUpdateBanner(app.appUpdateManager, onOpen = { showAppUpdates = true })
@@ -851,10 +848,6 @@ fun MainShell(
                                 }
                             }
                         )
-                        // Green-loader transition mask (see above): covers
-                        // the content area while the new screen fades in
-                        // underneath, then fades away to reveal it.
-                        TransitionMask(visible = transitionMask)
                         if (currentRoute == Routes.HOME) {
                             HomeMiniPlayerOverlay(
                                 visible = hasActiveItem,
@@ -864,18 +857,39 @@ fun MainShell(
                                 isFavorite = miniPlayerIsFavorite,
                                 canFavorite = miniPlayerCanFavorite,
                                 onToggleFavorite = ::toggleMiniPlayerFavorite,
+                                canAddToPlaylist = activeLibraryTrack != null,
+                                onAddToPlaylist = { miniPlayerPlaylistTrackUri = activeLibraryTrack?.uri },
                                 onMiniPlayerTap = {
                                     transitionMask = true
                                     navController.navigate(Routes.FULL_PLAYER)
                                 }
                             )
                         }
+                        // Last layer: Home's mini player cannot flash above the route cover.
+                        DestinationTransitionCover(currentBackStack?.id, transitionMask) { transitionMask = true }
                     }
                 }
             }
 
             // Create Playlist modal
-            if (showCreateSheet) {
+            miniPlayerPlaylistTrackUri?.let { trackUri ->
+        PlaylistPickerSheet(
+            trackUri = trackUri,
+            onDismiss = { miniPlayerPlaylistTrackUri = null },
+            onPick = { playlist ->
+                miniPlayerPlaylistTrackUri = null
+                // The picker can disappear while Room publishes the membership.
+                app.appScope.launch {
+                    val result = app.playlistRepository.addTracksToPlaylist(playlist.id, listOf(trackUri))
+                    withContext(Dispatchers.Main.immediate) {
+                        Toast.makeText(context, playlistAddMessage(playlist.name, result), Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+
+    if (showCreateSheet) {
                 CreatePlaylistSheet(
                     onDismiss = { showCreateSheet = false }
                 )
@@ -940,6 +954,8 @@ private fun HomeMiniPlayerOverlay(
     isFavorite: Boolean,
     canFavorite: Boolean,
     onToggleFavorite: () -> Unit,
+    canAddToPlaylist: Boolean,
+    onAddToPlaylist: () -> Unit,
     onMiniPlayerTap: () -> Unit
 ) {
     // Keep the player in the content layer rather than the Scaffold bottom
@@ -961,6 +977,8 @@ private fun HomeMiniPlayerOverlay(
                 isFavorite = isFavorite,
                 canFavorite = canFavorite,
                 onToggleFavorite = onToggleFavorite,
+                canAddToPlaylist = canAddToPlaylist,
+                onAddToPlaylist = onAddToPlaylist,
                 onMiniPlayerTap = onMiniPlayerTap
             )
         }
@@ -1009,79 +1027,6 @@ private fun SmoothProgressBar(
 }
 
 /**
- * Blob-based background wash: the header keeps its green gradient while
- * separate, soft-edged glows leave gaps for the black base to show through.
- */
-private fun Modifier.appBackgroundWash(): Modifier = drawWithCache {
-    val headerGradient = Brush.linearGradient(
-        colorStops = arrayOf(
-            0.0f to AccentGreen.copy(alpha = 0.10f),
-            0.26f to AppBackgroundGreen.copy(alpha = 0.62f),
-            0.68f to AppBackgroundGreen.copy(alpha = 0.23f),
-            1.0f to Color.Transparent
-        ),
-        start = Offset(size.width * 0.42f, 0f),
-        end = Offset(size.width * 0.42f, size.height * 0.27f)
-    )
-
-    fun blob(center: Offset, radius: Float, bodyAlpha: Float): Brush =
-        Brush.radialGradient(
-            colorStops = arrayOf(
-                0.0f to AppBackgroundGreen.copy(alpha = bodyAlpha * 0.55f),
-                0.30f to AppBackgroundGreen.copy(alpha = bodyAlpha),
-                0.70f to AppBackgroundGreen.copy(alpha = bodyAlpha * 0.42f),
-                1.0f to Color.Transparent
-            ),
-            center = center,
-            radius = radius
-        )
-
-    val blobs = listOf(
-        blob(
-            center = Offset(size.width * -0.12f, size.height * 0.36f),
-            radius = size.minDimension * 0.44f,
-            bodyAlpha = 0.73f
-        ),
-        blob(
-            center = Offset(size.width * 1.12f, size.height * 0.36f),
-            radius = size.minDimension * 0.41f,
-            bodyAlpha = 0.79f
-        ),
-        blob(
-            center = Offset(size.width * -0.08f, size.height * 0.82f),
-            radius = size.minDimension * 0.46f,
-            bodyAlpha = 0.78f
-        ),
-        blob(
-            center = Offset(size.width * 1.08f, size.height * 0.82f),
-            radius = size.minDimension * 0.44f,
-            bodyAlpha = 0.77f
-        ),
-        blob(
-            center = Offset(size.width * 0.18f, size.height * 0.52f),
-            radius = size.minDimension * 0.53f,
-            bodyAlpha = 0.66f
-        ),
-        blob(
-            center = Offset(size.width * 0.82f, size.height * 0.52f),
-            radius = size.minDimension * 0.53f,
-            bodyAlpha = 0.66f
-        ),
-        blob(
-            center = Offset(size.width * 0.50f, size.height * 0.70f),
-            radius = size.minDimension * 0.48f,
-            bodyAlpha = 0.58f
-        )
-    )
-
-    onDrawBehind {
-        blobs.forEach { drawRect(it) }
-        // Keep the green fade behind the Luno title and status-bar area.
-        drawRect(headerGradient)
-    }
-}
-
-/**
  * Green-loader transition mask: a solid full-area layer with the centered
  * spinner.  It appears instantly on a route change, holds for a deliberate
  * "black screen" moment while the new screen (swapped in instantly by the
@@ -1092,7 +1037,7 @@ private fun Modifier.appBackgroundWash(): Modifier = drawWithCache {
  * inside the nested Box.
  */
 @Composable
-private fun TransitionMask(visible: Boolean) {
+internal fun TransitionMask(visible: Boolean) {
     AnimatedVisibility(
         visible = visible,
         // No enter animation: the layer must be fully opaque in the very
@@ -1108,8 +1053,14 @@ private fun TransitionMask(visible: Boolean) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(PrimaryBackground)
-                .appBackgroundWash(),
+                .background(PrimaryBackground).testTag("page-transition-mask")
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center
         ) {
             CircularProgressIndicator(color = AccentGreen)

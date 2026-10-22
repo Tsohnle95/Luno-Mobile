@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -94,6 +95,7 @@ fun SortChip(
     mode: TrackSortMode,
     onModeChange: (TrackSortMode) -> Unit,
     compact: Boolean = false,
+    moreIcon: Boolean = false,
     availableModes: List<TrackSortMode> = TrackSortMode.LIBRARY_MODES
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -101,9 +103,9 @@ fun SortChip(
         if (compact) {
             androidx.compose.material3.IconButton(onClick = { showMenu = true }) {
                 Icon(
-                    imageVector = Icons.Filled.KeyboardArrowDown,
+                    imageVector = if (moreIcon) Icons.Filled.MoreHoriz else Icons.Filled.KeyboardArrowDown,
                     contentDescription = "Sort: ${mode.label}",
-                    tint = AccentGreen,
+                    tint = if (moreIcon) PrimaryText else AccentGreen,
                     modifier = Modifier.size(Dimens.iconSize)
                 )
             }

@@ -49,11 +49,12 @@ fun TrackRowCard(
     modifier: Modifier = Modifier,
     artworkUri: String? = track.albumArtUri(),
     selected: Boolean? = null,
-    onLongClick: (() -> Unit)? = null
+    onLongClick: (() -> Unit)? = null,
+    compactLibrary: Boolean = false
 ) {
     val rowModifier = modifier
             .fillMaxWidth()
-            .padding(Dimens.paddingSmall)
+            .then(if (compactLibrary) Modifier.padding(vertical = 8.dp) else Modifier.padding(Dimens.paddingSmall))
     Row(
         modifier = rowModifier.then(
             if (onLongClick != null) {
@@ -92,13 +93,13 @@ fun TrackRowCard(
             title = track.title,
             artworkUri = artworkUri,
             modifier = Modifier
-                .size(Dimens.albumArtSmall)
+                .size(if (compactLibrary) 54.dp else Dimens.albumArtSmall)
                 .clip(RoundedCornerShape(Dimens.cornerSmall)),
             placeholderIconSize = 20.dp,
             decodeSizePx = 192
         )
 
-        Spacer(modifier = Modifier.width(Dimens.paddingSmall))
+        Spacer(modifier = Modifier.width(if (compactLibrary) 12.dp else Dimens.paddingSmall))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -122,7 +123,7 @@ fun TrackRowCard(
                 Icon(
                     imageVector = Icons.Default.MoreVert,
                     contentDescription = "Track options",
-                    tint = AccentGreen,
+                    tint = if (compactLibrary) SecondaryText else AccentGreen,
                     modifier = Modifier.size(Dimens.iconSize)
                 )
             }

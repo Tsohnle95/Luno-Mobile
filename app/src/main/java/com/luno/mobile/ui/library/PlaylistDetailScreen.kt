@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,7 +23,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
@@ -57,6 +55,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,8 +77,10 @@ import com.luno.mobile.ui.components.playlistCreatedMessage
 import com.luno.mobile.ui.components.sortedByMode
 import com.luno.mobile.ui.components.sortedByPlaylistMembership
 import com.luno.mobile.ui.theme.AccentGreen
+import com.luno.mobile.ui.theme.PlayerPurple
 import com.luno.mobile.ui.theme.Dimens
 import com.luno.mobile.ui.theme.PrimaryText
+import com.luno.mobile.ui.theme.PrimaryBackground
 import com.luno.mobile.ui.theme.SecondaryText
 import com.luno.mobile.ui.theme.SurfaceDark
 import com.luno.mobile.ui.theme.SurfaceElevated
@@ -269,8 +270,7 @@ fun PlaylistDetailScreen(
             PlaylistArtworkHero(
                 name = playlistName,
                 description = playlistDescription,
-                tracks = tracks,
-                onBack = onBack
+                tracks = tracks
             )
         }
 
@@ -425,13 +425,12 @@ fun PlaylistDetailScreen(
 private fun PlaylistArtworkHero(
     name: String,
     description: String,
-    tracks: List<Track>,
-    onBack: () -> Unit
+    tracks: List<Track>
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(1.12f)
+            .height(LocalConfiguration.current.screenHeightDp.dp * 0.56f)
     ) {
         val cover = tracks.firstOrNull()
         RecommendationArtworkImage(
@@ -448,33 +447,13 @@ private fun PlaylistArtworkHero(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.24f),
-                        0.45f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.88f)
+                        0f to Color.Black.copy(alpha = 0.16f),
+                        0.42f to Color.Transparent,
+                        0.78f to PrimaryBackground.copy(alpha = 0.68f),
+                        1f to PrimaryBackground
                     )
                 )
         )
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .fillMaxWidth()
-                .padding(horizontal = Dimens.paddingSmall, vertical = Dimens.paddingSmall),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.38f))
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White,
-                    modifier = Modifier.size(Dimens.iconSize)
-                )
-            }
-        }
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -504,27 +483,6 @@ private fun PlaylistArtworkHero(
 }
 
 @Composable
-private fun LunoAttribution(modifier: Modifier = Modifier) {
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(width = 5.dp, height = 17.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(AccentGreen)
-        )
-        Spacer(modifier = Modifier.width(Dimens.paddingSmall))
-        Text(
-            text = "Luno",
-            style = MaterialTheme.typography.titleSmall,
-            color = PrimaryText,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
-
-
-
-@Composable
 private fun PlaylistHeader(
     trackCount: Int,
     totalDurationMs: Long,
@@ -541,7 +499,6 @@ private fun PlaylistHeader(
     Column(modifier = Modifier.padding(horizontal = Dimens.paddingLarge)) {
         Spacer(modifier = Modifier.height(Dimens.paddingMedium))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            LunoAttribution(modifier = Modifier.weight(1f))
             Text(
                 text = "$trackCount songs · ${formatPlaylistDuration(totalDurationMs)}",
                 style = MaterialTheme.typography.bodySmall,
@@ -604,6 +561,7 @@ private fun PlaylistHeader(
                         mode = sortMode,
                         onModeChange = onSortModeChange,
                         compact = true,
+                        moreIcon = true,
                         availableModes = TrackSortMode.PLAYLIST_MODES
                     )
                 }
@@ -612,15 +570,15 @@ private fun PlaylistHeader(
                 IconButton(
                     onClick = onPlayAll,
                     modifier = Modifier
-                        .size(56.dp)
+                        .size(44.dp)
                         .clip(CircleShape)
-                        .background(AccentGreen)
+                        .background(PlayerPurple)
                 ) {
                     Icon(
                         imageVector = Icons.Filled.PlayArrow,
                         contentDescription = "Play playlist",
-                        tint = Color.Black,
-                        modifier = Modifier.size(32.dp)
+                        tint = Color.White,
+                        modifier = Modifier.size(25.dp)
                     )
                 }
             }

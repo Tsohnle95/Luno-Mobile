@@ -97,6 +97,26 @@ notification/session controls. Saving prepared assets calls `promotePreview`;
 unprepared saves resolve/enqueue a durable job. UI becomes permanent only after
 actual durable completion. See [cross-boundary routes](../project_brain.md).
 
+## Player presentation
+
+Portrait FullPlayer uses a full-width artwork hero occupying 65% of its available
+viewport, fading into the neutral page. Title/artist sit below it, with Queue,
+Favorite and a horizontal three-dot options menu to their right. A white seek bar
+precedes repeat, previous, purple Play/Pause, next and shuffle controls. No app
+footer or top back arrow appears; Android Back returns to the prior screen.
+Metadata, seek and transport controls sit near the bottom of the initial viewport,
+with a 16dp bottom inset; extra vertical space falls between artwork and metadata.
+Discover mode
+and recommendations appear only after scrolling; Discover mode uses an explicit
+on/off switch, with no downward arrow or scroll-hint text. Session intent and
+preview Next routing remain the owners of control state and advancement.
+
+Both mini-player placements share a circled-plus action between Favorite and
+Play/Pause. It opens the existing playlist picker for a snapshot of the tapped
+library track URI. Membership writes run in `LunoApp.appScope` after dismissal;
+repository outcomes supply added/already-present feedback. Transient or unindexed
+tracks do not expose an enabled membership action.
+
 ## Evidence and direct checks
 
 - [MusicControllerTest](../app/src/test/java/com/luno/mobile/playback/MusicControllerTest.kt):
@@ -125,3 +145,55 @@ permission, background playback, Activity recreation/process restart and
 preview/save failure recovery as relevant. Live Last.fm/YouTube behavior and
 Android Keystore fallback require integration/device evidence; mocks do not
 establish provider availability. See [operations](android-development.md).
+
+## Temporary song videos
+
+`LunoApp.temporaryVideoManager` owns the process-lifetime, opt-in video plan.
+The song options menu toggles video mode; the existing artwork stage displays a
+muted native Media3 video using the same full-bleed crop, dimensions and fade.
+Audio remains owned by MusicService, and its position and actual playing state
+control the visual decoder. Leaving the screen releases only the visual player.
+
+The desktop-inspired plan stages the current track and at most five distinct
+successors, including already-prepared Discover assets. NewPipe resolves up to
+three title/artist/duration-matched candidates, preferring a quick MP4 at 480p or
+below. Once the current quick video is ready, the manager stages a higher-quality
+MP4 from that exact YouTube source, preferring 1080p then 720p, before prefetching
+successors. HD preparation has a separate bounded fifteen-minute deadline. Transfers reuse
+the validated parallel byte-range downloader on eligible YouTube CDN hosts,
+falling back to a single stream for unsupported servers. The quick video remains
+ready throughout; failed HD preparation
+leaves it playing, and a decoder failure falls back to its quick artifact when
+still cached. Generation checks fence late upgrades after skips or disabling.
+The visual player retains its last frame while switching local files and seeks
+to the authoritative audio clock without taking audio focus.
+Downloads publish atomically into cache/song-videos after size/header checks;
+individual files and the planned cache are capped at 384 MiB. Smaller MP4
+variants of the same source are retried before changing song candidates (at most
+three variants per candidate). These
+files never enter Room or durable library downloads. Disabling cancels work;
+generation checks reject stale completions, and timeouts/decoder failures expose
+retry without interrupting audio. A fresh manager clears previous-session bytes
+when video is enabled; resolved source identities persist separately.
+
+`TemporaryVideoManagerTest`, `TemporaryVideoDownloaderTest` and
+`TemporaryVideoPolicyTest` cover bounded planning, cancellation, fallback, timeout,
+cache invalidation, HTTP publication and audio-clock drift. `PlayerOrientationTest`
+and `DrawerRotationTest` render Compose regressions for landscape scrolling and controls
+and stable closed-drawer anchors. The drawer uses a fixed width across rotation;
+the shell applies horizontal system insets, and the full player disables drawer
+swipes while retaining the phone's system Back navigation.
+
+In landscape, the single-song artwork/video occupies the full initial app
+viewport without a bottom fade. The same outer player list scrolls to song
+metadata, seek/transport controls, Discover mode and recommendations below it;
+there is no separate scrolling controls pane. Entering landscape resets a saved
+portrait scroll offset to the artwork at the top. Portrait retains its fading art
+and initially visible controls.
+
+The general Library play control builds a complete library context in the
+selected sort order, independently of search, filters or playlist membership.
+A normal tap starts index zero with shuffle explicitly disabled. Holding for one
+second toggles a saved Library shuffle preference without starting playback;
+a subsequent tap starts a random item with Media3 shuffle enabled for the entire
+library. Playlist screens continue to install their own scoped contexts.

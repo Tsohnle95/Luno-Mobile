@@ -79,6 +79,9 @@ only ranges eligible `googlevideo.com` hosts. It bounds concurrency, verifies
 and verifies final bytes. Rejection/cancellation cleans chunks/target and allows
 ordinary-stream fallback; cancellation cancels blocked calls. Keep validation
 at this transport boundary rather than trusting a CDN response by hostname.
+Temporary video transfers reuse this transport with their own 384 MiB maximum;
+the default durable-download ceiling remains unchanged. Each consumer still
+owns format validation and atomic publication into its final destination.
 The size floor must stay far below ordinary song length: YouTube throttles a
 single un-ranged media connection to a small fraction of full speed, so gating
 ranges on multi-megabyte files silently sends typical three-minute songs down

@@ -357,14 +357,15 @@ class MusicController @JvmOverloads constructor(
     fun play(
         tracks: List<MediaTrack>,
         startIndex: Int = 0,
-        playlistId: Long? = null
+        playlistId: Long? = null,
+        shuffle: Boolean? = null
     ): Boolean {
         if (released) return true
         if (tracks.isEmpty()) return true
         val request = PlaybackRequest(
             items = tracks.toList(),
             startIndex = startIndex.coerceIn(0, tracks.lastIndex),
-            shuffle = null,
+            shuffle = shuffle,
             playlistId = playlistId
         )
         return dispatchPlayback(request)

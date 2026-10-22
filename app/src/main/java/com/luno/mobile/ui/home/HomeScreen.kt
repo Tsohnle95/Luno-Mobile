@@ -159,7 +159,7 @@ internal fun recentlyPlayedPlaylists(
 
 /**
  * Home greeting, a persisted recent-playlist grid, and the existing local
- * library carousels. Settings is opened from the profile icon beside the greeting.
+ * library carousels. Settings opens from the purple L badge to the left of the greeting.
  */
 @Composable
 fun HomeScreen(
@@ -970,21 +970,14 @@ private fun HomeHero(
             .padding(horizontal = Dimens.paddingLarge),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        com.luno.mobile.ui.components.LunoProfileButton(onOpenSettings)
         Text(
             text = "Good $greeting",
             style = MaterialTheme.typography.titleLarge,
             color = PrimaryText,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f).padding(start = 10.dp)
         )
-        IconButton(onClick = onOpenSettings, modifier = Modifier.size(40.dp)) {
-            Icon(
-                imageVector = Icons.Filled.AccountCircle,
-                contentDescription = "Profile and settings",
-                tint = PrimaryText,
-                modifier = Modifier.size(Dimens.iconSize)
-            )
-        }
     }
 }
 

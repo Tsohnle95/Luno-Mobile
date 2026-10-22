@@ -1,5 +1,10 @@
 # Your Library design concepts
 
+The new [disposable 25-direction study](library-25-disposable.html) is a single,
+self-contained file with numbered mobile previews, an overview and two-way
+comparison. It explores Spotify-inspired library structures on flat charcoal;
+**01 / The familiar library** is now implemented in the Android app.
+
 Open **[index.html](index.html)** in a browser to compare all ten designs. Each
 concept has an **Explore** preview and an **Open full screen** link. Select any
 two concepts to view them side by side. Everything runs locally with no package
@@ -14,11 +19,11 @@ are visual references for the existing app chrome.
 
 ## Selected direction
 
-**10 / Record shelf** is selected with straight artwork, the current underline
-search input and the current ordinary Favorites row. The app uses 10's original
-green background and shelf layout. [Preview the current app target](concept.html?concept=10&preview=selected).
-All ten numbered concepts retain the original designs shown when you chose;
-the app target has its own preview and does not replace concept 10.
+**01 / The familiar library** from the new 25-direction study is the current
+Android direction: flat charcoal, compact collection rows, type chips, search,
+sort and a playlist grid option. The original ten concepts below and their
+[selected-target preview](concept.html?concept=10&preview=selected) are historical
+references and retain the earlier green record-shelf design.
 
 ## Theme
 

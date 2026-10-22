@@ -6,20 +6,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -36,9 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.luno.mobile.LunoApp
 import com.luno.mobile.data.db.dao.PlaylistWithTracks
@@ -65,12 +56,14 @@ import com.luno.mobile.ui.theme.SurfaceDark
 import com.luno.mobile.ui.theme.SurfaceElevated
 import kotlinx.coroutines.launch
 
-/** Library shelf presentation; Room projections and existing playback/actions remain authoritative. */
+/** Library collection list; Room projections and playback/actions remain authoritative. */
 @Composable
 fun LibraryScreen(
     musicController: MusicController,
     onPlay: (List<MediaTrack>, Int, Boolean) -> Unit = { _, _, _ -> },
     onOpenPlaylist: (Long) -> Unit = {},
+    onCreatePlaylist: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     onExportTracks: (List<String>) -> Unit = {},
     onExportPlaylists: (List<Long>) -> Unit = {}
 ) {
@@ -85,9 +78,12 @@ fun LibraryScreen(
     val playlistsWithTracks by libraryData.playlists.collectAsState()
     val downloads by libraryData.downloads.collectAsState()
     val libraryLoaded by libraryData.loaded.collectAsState()
-    val shuffleEnabled by musicController.shuffleEnabled.collectAsState()
     var query by rememberSaveable { mutableStateOf("") }
-    var playlistView by rememberSaveable { mutableStateOf(true) }
+    var libraryShuffle by rememberSaveable { mutableStateOf(false) }
+    var filter by rememberSaveable { mutableStateOf(LibraryFilter.PLAYLISTS) }
+    var gridView by rememberSaveable { mutableStateOf(false) }
+    val showPlaylists = filter == LibraryFilter.PLAYLISTS
+    val showSongs = filter == LibraryFilter.SONGS
     var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.RECENT) }
 
     // All-or-nothing first render: hold the whole screen behind one static
@@ -108,7 +104,6 @@ fun LibraryScreen(
     // Multi-select / batch actions (3-dot menu on the section header)
     var selectionMode by remember { mutableStateOf(false) }
     var selectedKeys by remember { mutableStateOf(setOf<String>()) }
-    var showBatchMenu by remember { mutableStateOf(false) }
 
     // Track actions sheet — hoisted out of the LazyColumn: composing a
     // ModalBottomSheet inside a lazy item makes it scroll with the list.
@@ -179,13 +174,11 @@ fun LibraryScreen(
 
     // Batch-action helpers: keys are track URIs in songs view, "p<id>" in
     // playlist view.
-    val allKeys = if (playlistView) {
-        displayPlaylists
+    val allKeys = buildSet {
+        if (showPlaylists) addAll(displayPlaylists
             .filter { it.playlist.id != SystemPlaylists.FAVORITES_ID }
-            .map { "p${it.playlist.id}" }
-            .toSet()
-    } else {
-        sortedTracks.map { it.uri }.toSet()
+            .map { "p${it.playlist.id}" })
+        if (showSongs) addAll(sortedTracks.map { it.uri })
     }
     val selectedSongs = selectedKeys.filter { !it.startsWith("p") }
     val selectedPlaylistIds = selectedKeys.filter { it.startsWith("p") }
@@ -243,30 +236,99 @@ fun LibraryScreen(
         exitSelection()
     }
 
+    @Composable
+    fun PlaylistEntry(playlistWithTracks: PlaylistWithTracks, modifier: Modifier) {
+        val playlistKey = "p${playlistWithTracks.playlist.id}"
+        val isFavoritesPlaylist = playlistWithTracks.playlist.id == SystemPlaylists.FAVORITES_ID
+        PlaylistCard(
+            playlist = playlistWithTracks.playlist,
+            tracks = playlistWithTracks.tracks,
+            selected = if (!isFavoritesPlaylist && selectionMode) {
+                playlistKey in selectedKeys
+            } else {
+                null
+            },
+            onClick = {
+                if (selectionMode && !isFavoritesPlaylist) {
+                    toggleSelection(playlistKey)
+                } else {
+                    onOpenPlaylist(playlistWithTracks.playlist.id)
+                }
+            },
+            onLongClick = if (isFavoritesPlaylist) {
+                null
+            } else {
+                { beginSelection(playlistKey) }
+            },
+            onSync = if (isFavoritesPlaylist) null else {
+                {
+                    if (playlistWithTracks.playlist.playlistUrl.isNotBlank()) {
+                        scope.launch {
+                            app.downloadRepository.syncPlaylist(
+                                playlistId = playlistWithTracks.playlist.id,
+                                playlistName = playlistWithTracks.playlist.name,
+                                playlistUrl = playlistWithTracks.playlist.playlistUrl
+                            )
+                        }
+                    }
+                }
+            },
+            onStopSync = if (!isFavoritesPlaylist && playlistHasActiveJobs(playlistWithTracks.playlist.id)) {
+                {
+                    scope.launch {
+                        app.downloadRepository.cancelPlaylistSync(playlistWithTracks.playlist.id)
+                    }
+                }
+            } else {
+                null
+            },
+            onUrlChanged = if (isFavoritesPlaylist) null else {
+                { urlDialogPlaylist = playlistWithTracks.playlist }
+            },
+            onClearPlaylist = if (isFavoritesPlaylist) null else {
+                { clearDialogPlaylist = playlistWithTracks.playlist }
+            },
+            onDelete = if (isFavoritesPlaylist) null else {
+                { deleteDialogPlaylist = playlistWithTracks.playlist }
+            },
+            onExport = if (isFavoritesPlaylist) null else {
+                { onExportPlaylists(listOf(playlistWithTracks.playlist.id)) }
+            },
+            modifier = modifier,
+            gridView = gridView,
+            showOptions = !isFavoritesPlaylist
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(Dimens.paddingSmall),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
         item {
             LibraryHeader(
-                tracks = allTracks,
-                playlistCount = playlistsWithTracks.size + 1,
                 query = query,
                 onQueryChange = { query = it },
-                playlistView = playlistView,
-                onViewChange = {
-                    if (playlistView != it) {
-                        playlistView = it
+                filter = filter,
+                onFilterChange = {
+                    if (filter != it) {
+                        filter = it
                         exitSelection()
                     }
                 },
                 sortMode = sortMode,
                 onSortChange = { sortMode = it },
-                canPlay = mediaTracks.isNotEmpty(),
-                shuffleEnabled = shuffleEnabled,
-                onPlay = { onPlay(mediaTracks, 0, false) },
-                onShuffle = { musicController.toggleShuffle() }
+                gridView = gridView,
+                onToggleView = { gridView = !gridView },
+                onCreatePlaylist = onCreatePlaylist,
+                onOpenSettings = onOpenSettings,
+                onSelectAll = { setAllVisibleSelected(true) },
+                libraryShuffle = libraryShuffle,
+                libraryCanPlay = allTracks.isNotEmpty(),
+                onToggleLibraryShuffle = { libraryShuffle = !libraryShuffle },
+                onPlayLibrary = {
+                    onPlay(allTracks.sortedByMode(sortMode).map { it.toMediaTrack() }, 0, libraryShuffle)
+                }
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(Dimens.paddingSmall)) {
                     if (selectionMode) {
@@ -293,121 +355,54 @@ fun LibraryScreen(
                             onDeletePlaylists = { ids ->
                                 scope.launch { ids.forEach { app.playlistRepository.deletePlaylist(it) } }
                                 exitSelection()
-                            },
-                            modifier = Modifier.padding(horizontal = 24.dp)
-                        )
-                    }
-                    val sectionTitle = if (playlistView) "Playlists (${displayPlaylists.size})"
-                        else "Tracks (${sortedTracks.size})"
-                    if (selectionMode) {
-                        Text(
-                            text = sectionTitle,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = PrimaryText,
-                            modifier = Modifier.padding(horizontal = 24.dp)
-                        )
-                    } else {
-                        BatchSectionHeader(
-                            title = sectionTitle,
-                            showMenu = showBatchMenu,
-                            onMenuToggle = { showBatchMenu = !showBatchMenu },
-                            onMenuDismiss = { showBatchMenu = false },
-                            selectionMode = false,
-                            selectedCount = 0,
-                            onSelectAll = { setAllVisibleSelected(true) },
-                            onOptions = {},
-                            onCancelSelection = ::exitSelection
+                            }
                         )
                     }
                 }
             }
         }
 
-        if (playlistView) {
-            // Playlist view — all playlists, full-width cards
-            if (displayPlaylists.isEmpty()) {
-                item {
-                    Text(
-                        text = if (query.isBlank()) {
-                            "No playlists yet. Long-press a song and choose \"New playlist\"."
-                        } else {
-                            "No playlists match \"$query\"."
-                        },
-                        color = SecondaryText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 24.dp)
-                    )
-                }
-            } else {
-                items(
-                    displayPlaylists,
-                    key = { it.playlist.id },
-                    contentType = { "playlist" }
-                ) { playlistWithTracks ->
-                    val playlistKey = "p${playlistWithTracks.playlist.id}"
-                    val isFavoritesPlaylist = playlistWithTracks.playlist.id == SystemPlaylists.FAVORITES_ID
-                    PlaylistCard(
-                        playlist = playlistWithTracks.playlist,
-                        tracks = playlistWithTracks.tracks,
-                        selected = if (!isFavoritesPlaylist && selectionMode) {
-                            playlistKey in selectedKeys
-                        } else {
-                            null
-                        },
-                        onClick = {
-                            if (selectionMode && !isFavoritesPlaylist) {
-                                toggleSelection(playlistKey)
-                            } else {
-                                onOpenPlaylist(playlistWithTracks.playlist.id)
-                            }
-                        },
-                        onLongClick = if (isFavoritesPlaylist) {
-                            null
-                        } else {
-                            { beginSelection(playlistKey) }
-                        },
-                        onSync = if (isFavoritesPlaylist) null else {
-                            {
-                                if (playlistWithTracks.playlist.playlistUrl.isNotBlank()) {
-                                    scope.launch {
-                                        app.downloadRepository.syncPlaylist(
-                                            playlistId = playlistWithTracks.playlist.id,
-                                            playlistName = playlistWithTracks.playlist.name,
-                                            playlistUrl = playlistWithTracks.playlist.playlistUrl
-                                        )
-                                    }
-                                }
-                            }
-                        },
-                        onStopSync = if (!isFavoritesPlaylist && playlistHasActiveJobs(playlistWithTracks.playlist.id)) {
-                            {
-                                scope.launch {
-                                    app.downloadRepository.cancelPlaylistSync(playlistWithTracks.playlist.id)
-                                }
-                            }
-                        } else {
-                            null
-                        },
-                        onUrlChanged = if (isFavoritesPlaylist) null else {
-                            { urlDialogPlaylist = playlistWithTracks.playlist }
-                        },
-                        onClearPlaylist = if (isFavoritesPlaylist) null else {
-                            { clearDialogPlaylist = playlistWithTracks.playlist }
-                        },
-                        onDelete = if (isFavoritesPlaylist) null else {
-                            { deleteDialogPlaylist = playlistWithTracks.playlist }
-                        },
-                        onExport = if (isFavoritesPlaylist) null else {
-                            { onExportPlaylists(listOf(playlistWithTracks.playlist.id)) }
-                        },
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                        showOptions = !isFavoritesPlaylist
-                    )
+        if (filter == LibraryFilter.ALBUMS) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(24.dp)) {
+                    Text("Albums", style = MaterialTheme.typography.titleLarge, color = PrimaryText)
+                    Text("Album browsing is coming soon. Your music is available in Songs.",
+                        style = MaterialTheme.typography.bodyMedium, color = SecondaryText)
                 }
             }
-        } else {
+        }
+        if (showPlaylists) {
+            if (displayPlaylists.isEmpty() && !showSongs) {
+                item {
+                    Text("No playlists match your search.", color = SecondaryText,
+                        modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            }
+            if (gridView) {
+                items(displayPlaylists.chunked(2), key = { "grid-${it.first().playlist.id}" },
+                    contentType = { "playlist-grid" }) { pair ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        pair.forEach { PlaylistEntry(it, Modifier.weight(1f)) }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            } else {
+                items(displayPlaylists, key = { "playlist-${it.playlist.id}" },
+                    contentType = { "playlist" }) {
+                    PlaylistEntry(it, Modifier.padding(horizontal = 16.dp))
+                }
+            }
+        }
+        if (showSongs) {
+            if (showPlaylists && sortedTracks.isNotEmpty()) {
+                item {
+                    Text("Songs", style = MaterialTheme.typography.titleMedium, color = PrimaryText,
+                        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp))
+                }
+            }
             // All-songs view — every track in the track card layout
-            if (sortedTracks.isEmpty()) {
+            if (sortedTracks.isEmpty() && (!showPlaylists || displayPlaylists.isEmpty())) {
                 item {
                     Text(
                         text = if (query.isBlank()) {
@@ -417,7 +412,7 @@ fun LibraryScreen(
                         },
                         color = SecondaryText,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 24.dp)
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
             } else {
@@ -428,6 +423,7 @@ fun LibraryScreen(
                 ) { track ->
                     TrackRowCard(
                         track = track,
+                        compactLibrary = true,
                         selected = if (selectionMode) track.uri in selectedKeys else null,
                         onClick = {
                             if (selectionMode) {
@@ -446,7 +442,7 @@ fun LibraryScreen(
                         },
                         onMenuClick = { actionsTrack = track },
                         onLongClick = { beginSelection(track.uri) },
-                        modifier = Modifier.padding(horizontal = 24.dp)
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
             }
@@ -532,80 +528,6 @@ fun LibraryScreen(
         )
     }
 
-}
-
-/**
- * Section header row with the 3-dot menu used to enter selection by selecting
- * all visible items. Once selection is active, BulkSelectionToolbar owns the
- * visible select-all checkbox and complete actions menu.
- */
-@Composable
-private fun BatchSectionHeader(
-    title: String,
-    showMenu: Boolean,
-    onMenuToggle: () -> Unit,
-    onMenuDismiss: () -> Unit,
-    selectionMode: Boolean,
-    selectedCount: Int,
-    onSelectAll: () -> Unit,
-    onOptions: () -> Unit,
-    onCancelSelection: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 24.dp, end = 24.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = if (selectionMode) "$selectedCount selected" else title,
-            style = MaterialTheme.typography.titleMedium,
-            color = if (selectionMode) AccentGreen else PrimaryText,
-            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-            modifier = Modifier
-                .weight(1f)
-                .padding(vertical = Dimens.paddingSmall)
-        )
-        Box {
-            IconButton(onClick = onMenuToggle) {
-                Icon(
-                    imageVector = Icons.Filled.MoreVert,
-                    contentDescription = "Batch actions",
-                    tint = SecondaryText
-                )
-            }
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = onMenuDismiss
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Select all", color = PrimaryText) },
-                    onClick = {
-                        onMenuDismiss()
-                        onSelectAll()
-                    }
-                )
-                if (selectionMode && selectedCount > 0) {
-                    DropdownMenuItem(
-                        text = { Text("Options", color = PrimaryText) },
-                        onClick = {
-                            onMenuDismiss()
-                            onOptions()
-                        }
-                    )
-                }
-                if (selectionMode) {
-                    DropdownMenuItem(
-                        text = { Text("Cancel selection", color = PrimaryText) },
-                        onClick = {
-                            onMenuDismiss()
-                            onCancelSelection()
-                        }
-                    )
-                }
-            }
-        }
-    }
 }
 
 @Composable

@@ -142,6 +142,17 @@ class RecommendationPreviewManager(
     private val _state = MutableStateFlow(RecommendationPreviewState())
     val state: StateFlow<RecommendationPreviewState> = _state.asStateFlow()
 
+    /** Video may reuse prepared successor identities, but never starts audio prefetch itself. */
+    fun preparedVideoSuccessors(): List<MediaTrack> = synchronized(lock) {
+        val snapshot = _state.value
+        val currentIndex = snapshot.recommendations.indexOfFirst { recommendationKey(it) == snapshot.currentKey }
+        snapshot.recommendations.drop(currentIndex + 1).mapNotNull { recommendation ->
+            val key = recommendationKey(recommendation)
+            (assetsByKey[key] ?: prefetchedAssetsByKey[key])?.takeIf { it.file.isFile }?.mediaTrack
+        }.take(5)
+    }
+
+
     @Volatile private var musicController: MusicController? = null
     private var monitorJob: Job? = null
     private var sessionJob: Job? = null

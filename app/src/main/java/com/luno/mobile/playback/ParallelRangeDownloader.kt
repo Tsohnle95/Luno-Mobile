@@ -32,7 +32,8 @@ internal class ParallelRangeDownloader(
     private val chunkSizeBytes: Long = DEFAULT_CHUNK_SIZE_BYTES,
     private val minimumParallelSizeBytes: Long = DEFAULT_MINIMUM_SIZE_BYTES,
     private val maximumParallelRequests: Int = DEFAULT_PARALLEL_REQUESTS,
-    private val isEligibleHost: (String) -> Boolean = ::isYouTubeCdnHost
+    private val isEligibleHost: (String) -> Boolean = ::isYouTubeCdnHost,
+    private val maximumSizeBytes: Long = MAX_SUPPORTED_SIZE_BYTES
 ) {
     sealed interface Outcome {
         data class Completed(
@@ -86,7 +87,7 @@ internal class ParallelRangeDownloader(
             ) ?: return Outcome.Unsupported
 
             val totalBytes = first.totalBytes
-            if (totalBytes < minimumParallelSizeBytes || totalBytes > MAX_SUPPORTED_SIZE_BYTES) {
+            if (totalBytes < minimumParallelSizeBytes || totalBytes > maximumSizeBytes) {
                 return Outcome.Unsupported
             }
             if (first.end != minOf(firstEnd, totalBytes - 1L)) return Outcome.Unsupported

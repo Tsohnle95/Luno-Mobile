@@ -83,6 +83,22 @@ class MusicControllerTest {
     }
 
     @Test
+    fun `ordered library play resets shuffle and replaces playlist context with the full library`() {
+        val library = listOf(track("first"), track("middle"), track("last"))
+        controller.playShuffled(listOf(track("playlist-only")), playlistId = 123)
+        controller.play(library, startIndex = 0, shuffle = false)
+        val request = controller.pendingRequest!!
+        assertThat(request.items).containsExactlyElementsIn(library).inOrder()
+        assertThat(request.startIndex).isEqualTo(0)
+        assertThat(request.shuffle).isFalse()
+        assertThat(request.playlistId).isNull()
+        controller.playShuffled(library)
+        assertThat(controller.pendingRequest!!.shuffle).isTrue()
+        assertThat(controller.pendingRequest!!.items).containsExactlyElementsIn(library).inOrder()
+        assertThat(controller.pendingRequest!!.playlistId).isNull()
+    }
+
+    @Test
     fun `playSequential disables shuffle and repeat for a finite preview`() {
         val preview = MediaTrack(uri = "file:///cache/preview.m4a", isTransient = true)
 

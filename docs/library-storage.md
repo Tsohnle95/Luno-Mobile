@@ -73,30 +73,43 @@ unexpectedly delete source audio. Download destination publication is owned by
 ## Library presentation
 
 [LibraryScreen](../app/src/main/java/com/luno/mobile/ui/library/LibraryScreen.kt)
-uses the selected record-shelf direction from [the design gallery](../design/README.md).
+implements **01 / The familiar library** from the
+[disposable 25-direction study](../design/library-25-disposable.html).
 [LibraryHeader](../app/src/main/java/com/luno/mobile/ui/library/LibraryPresentation.kt)
-uses concept 10's title, playback cluster and view/sort line over its green corner
-light. The shell draws this Library background
-across the edge-to-edge window, including the transparent status bar, while the
-list scrolls above it; this keeps the green treatment continuous at the top.
-Library owns its header; the shell omits the Luno wordmark here. Playlist
-artwork remains upright.
-The initial view is Playlists; direct Songs/Playlists tabs retain
-saveable view state and clear selection only when the view actually changes.
-Search has the underline treatment from concept 05; search and sort use the
-existing projections and shared `TrackSortMode` modes. Library and in-playlist
-search trim surrounding whitespace before matching, so a trailing space (for
-example "Swimming ") does not hide a valid song; a whitespace-only query matches
-everything. Header counts include
-the virtual Favorites playlist, consistently with the list.
+uses a compact Luno settings badge, title, search and create actions, Playlists / Songs /
+Albums tabs, sort menu, playlist list/grid toggle and selection menu.
+Search opens a neutral filled field and preserves the query across filter changes.
+The initial Playlists tab lists virtual Favorites and playlists. Songs shows the
+track collection; Albums is a future-use placeholder and does not change metadata.
+Filter and playlist layout state are saveable;
+changing the filter clears selection only when the filter actually changes.
+Grid and list layouts reuse the same playlist callbacks and metadata. Song rows
+remain a list. Selection applies to the current tab, while virtual Favorites stays excluded
+from destructive bulk actions.
+
+The shell uses a flat charcoal `PrimaryBackground` across every route, including
+beneath the transparent status bar and during route transitions. Library has no
+corner glow; the mini-player uses a flat neutral surface. Playlist detail and
+the full player fade their artwork into the neutral page background. Library
+owns its header; the shell omits the Luno wordmark here.
+Search and sort use existing projections and shared `TrackSortMode` modes. Library
+and in-playlist search trim surrounding whitespace before matching, so a trailing
+space (for example "Swimming ") does not hide a valid song; a whitespace-only
+query matches everything. Favorites and Unsorted keep their reserved positions
+above other playlists independently of sorting.
 
 [PlaylistCard](../app/src/main/java/com/luno/mobile/ui/components/PlaylistCard.kt)
-renders larger flat artwork and actual song-count/total-duration metadata. The
-virtual Favorites row has a green heart tile, the same geometry/type/divider as
-other rows, and no destructive actions. Existing
-selection, sync/cancellation, URL editing, clear/delete and export callbacks stay
-owned by the screen/repositories. Header playback uses the sorted, filtered song
-context and is disabled when that context is empty.
+uses compact 54dp square artwork, a single-line playlist title and type/song-count
+metadata. Grid entries enlarge the same artwork above their title. Favorites uses
+a flat purple heart tile, with no destructive options or separate decorative card.
+Existing selection, sync/cancellation, URL editing, clear/delete and export callbacks stay
+owned by the screen/repositories. Song playback uses the sorted, filtered song
+context so Next/Previous follows the visible song order.
+
+Playlist detail uses a viewport-relative tall cover with a bottom fade, no app
+wordmark or top back arrow, a compact purple Play control, and a horizontal-dot
+sort menu. Search, shuffle, favorites-first and sort semantics remain unchanged.
+Android Back owns return navigation.
 
 ## SAF flow, failures and recovery
 
@@ -153,3 +166,16 @@ Rendering is in `ui/components/ArtworkImage.kt`, `ArtworkCollage.kt` and
   uses a fake permission persister and test FileProvider. Real picker/providers,
   durable grants across restart, removable storage and UI appearance require
   [direct device checks](android-development.md).
+
+Home and Library share the purple L profile/settings button. The launcher uses
+the provided purple L artwork in adaptive and density-specific Android assets.
+The Library filter row also exposes library-wide play: normal mode starts the
+first track in the selected sort order; a one-second hold toggles shuffle for
+subsequent taps. This action ignores search and filter projections and sends the
+complete library queue; playlist playback retains its own context.
+
+Navigation's destination-driven cover observes back-stack entry identity, so
+system Back, restored tabs and explicit navigation all cover the incoming
+screen's first frame. The cover renders above Home's mini-player overlay and
+restarts its hold/readiness window for each new destination. Its opaque and
+fading layer consumes pointer input so hidden screen actions cannot activate.

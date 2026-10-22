@@ -124,6 +124,8 @@ fun LunoNavHost(
         composable(Routes.LIBRARY) {
             LibraryScreen(
                 musicController = musicController,
+                onCreatePlaylist = onCreatePlaylist,
+                onOpenSettings = onOpenSettings,
                 onPlay = onPlay,
                 onExportTracks = onExportTracks,
                 onExportPlaylists = onExportPlaylists,

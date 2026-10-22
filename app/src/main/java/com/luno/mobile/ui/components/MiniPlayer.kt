@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -30,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -52,14 +52,15 @@ fun MiniPlayer(
     onPrevious: () -> Unit = { musicController.skipToPrevious() },
     isFavorite: Boolean = false,
     canFavorite: Boolean = false,
-    onToggleFavorite: () -> Unit = {}
+    onToggleFavorite: () -> Unit = {},
+    canAddToPlaylist: Boolean = false,
+    onAddToPlaylist: () -> Unit = {}
 ) {
     val playWhenReady by musicController.playWhenReady.collectAsState()
     val currentTrack by musicController.currentTrack.collectAsState()
     val progress by musicController.progress.collectAsState()
     val duration by musicController.duration.collectAsState()
     val swipeThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
-    val (gradientTop, gradientBottom) = rememberArtworkColors(currentTrack?.artworkUri)
 
     if (currentTrack == null) return
 
@@ -73,14 +74,6 @@ fun MiniPlayer(
         modifier = Modifier
             .fillMaxWidth()
             .background(MiniPlayerSurface)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        gradientTop.copy(alpha = 0.42f),
-                        gradientBottom.copy(alpha = 0.28f)
-                    )
-                )
-            )
             .pointerInput(musicController, swipeThresholdPx) {
                 var horizontalDrag = 0f
                 detectHorizontalDragGestures(
@@ -179,6 +172,12 @@ fun MiniPlayer(
             }
 
             // Play/Pause button
+            IconButton(onClick = onAddToPlaylist, enabled = canAddToPlaylist) {
+                Icon(Icons.Outlined.AddCircleOutline, "Add to playlist",
+                    tint = if (canAddToPlaylist) PrimaryText else SecondaryText.copy(alpha = 0.35f),
+                    modifier = Modifier.size(24.dp))
+            }
+
             IconButton(
                 onClick = { musicController.togglePlayPause() },
                 modifier = Modifier.size(Dimens.touchTargetMin)

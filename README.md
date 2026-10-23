@@ -1,11 +1,44 @@
 # Luno Mobile
 
-Luno Mobile is the Android edition of Luno, built with Kotlin, Jetpack Compose,
-Room, Media3, WorkManager, and NewPipeExtractor.
+<p align="center">
+  <a href="https://github.com/Tsohnle95/Luno-Mobile/releases/latest">
+    <img src="docs/assets/releases/luno-mobile-banner.png" alt="Luno Mobile — Your music. Your library." />
+  </a>
+</p>
 
-## Development
+<p align="center">
+  <a href="https://github.com/Tsohnle95/Luno-Mobile/releases/latest">
+    <img src="docs/assets/releases/download-android.png" alt="Download Luno Mobile for Android" width="320" height="64" />
+  </a>
+  <br />
+  <sub>Universal APK · Android 10 or later</sub>
+</p>
 
-Clone with the pinned NewPipeExtractor submodule:
+Luno Mobile brings local listening, playlists, and music discovery together in
+one offline-first Android music player.
+
+## Made for your music
+
+- **Keep your collection close.** Browse music on your device, save favorites,
+  and organize tracks into playlists.
+- **Pick up where you left off.** Your queue, current track, playback position,
+  and repeat mode are restored when you reopen the app.
+- **Find something new.** Explore music with previews, then save the tracks you
+  want to keep.
+
+## Download
+
+Get the latest universal APK from the [Luno Mobile release page](https://github.com/Tsohnle95/Luno-Mobile/releases/latest).
+It supports Android 10 and later. Updating an existing installation keeps your
+library; see the [install and update guide](ANDROID_RELEASES.md) for details.
+
+## Build from source
+
+Luno Mobile is built with Kotlin and Jetpack Compose. Room stores library data,
+Media3 handles playback, and WorkManager runs background downloads and sync.
+
+Clone the repository with its pinned NewPipeExtractor submodule, then run the
+project verification gate:
 
 ```bash
 git clone --recurse-submodules https://github.com/Tsohnle95/Luno-Mobile.git
@@ -13,37 +46,12 @@ cd Luno-Mobile
 python3 scripts/verify.py
 ```
 
-The project runs Gradle with Java 17 and needs a Java 11 compiler toolchain for
-the included extractor build. It uses the Android SDK configured by Gradle and
-keeps the application identity `com.luno.mobile`. The NewPipeExtractor submodule is
-pinned to v0.26.4; do not replace it with an unpinned or local-only checkout.
+The build needs Java 17, a Java 11 compiler toolchain for NewPipeExtractor, and
+the Android SDK. See [development setup and verification](docs/android-development.md)
+for setup and device coverage.
 
-See [development setup and verification](docs/android-development.md) for SDK
-setup, focused checks and device coverage, and [Android releases](ANDROID_RELEASES.md)
-for signing/publishing. Coding agents start at [AGENTS.md](AGENTS.md).
+## Works with Luno Desktop
 
-## Release
-
-Release builds use the environment variables below. Signing material must stay
-outside the repository:
-
-```text
-ANDROID_RELEASE_KEYSTORE_PATH
-ANDROID_RELEASE_STORE_PASSWORD
-ANDROID_RELEASE_KEY_ALIAS
-ANDROID_RELEASE_KEY_PASSWORD
-```
-
-The GitHub release workflow supplies the keystore from the base64-encoded
-`ANDROID_RELEASE_KEYSTORE_BASE64` secret and publishes `Luno-Mobile-v*.apk`.
-
-## Transfer compatibility
-
-The versioned, path-free library transfer fixtures live in
-`contracts/library-export/v1/` and are intentionally duplicated with Luno
-Desktop. Desktop and Mobile must remain compatible with the v1 manifest.
-
-Desktop development: https://github.com/Tsohnle95/Luno-Desktop
-
-The legacy Python/Tkinter desktop is frozen under the
-`legacy-python-desktop-final` archive tag in Luno Desktop.
+Mobile and Desktop share the path-free library transfer v1 format. See the
+[transfer contract](contracts/library-export/v1/README.md) and
+[Luno Desktop](https://github.com/Tsohnle95/Luno-Desktop).

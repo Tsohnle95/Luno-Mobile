@@ -60,6 +60,11 @@ coordinating shared-state changes and integrated validation.
 - Preserve `com.luno.mobile`, explicit Room migrations/schema history, Media3
   sessions, SAF/library semantics, downloads/WorkManager, discovery/artwork and
   v1 Desktop compatibility.
+- Close build tooling you started before finishing. Prefer `--no-daemon` for
+  agent-run Gradle; otherwise run `./gradlew --stop` and terminate any matching
+  `KotlinCompileDaemon` you left running (inspect with `jps -lv` first). Never
+  kill unrelated Java/IDE/user processes. Details:
+  [development cleanup](docs/android-development.md#agent-process-cleanup).
 - Keep NewPipeExtractor pinned to v0.26.4 through the tracked submodule; its
   catalog coordinate is substituted by `settings.gradle.kts`.
 - Never read/print secret values for discovery. Keep signing material and

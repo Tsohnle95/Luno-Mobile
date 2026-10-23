@@ -102,6 +102,22 @@ Terminal session discards the passwords. Gradle builds incrementally; use the
 canonical gate before the final checkpoint. No GitHub release is needed to
 iterate on the phone.
 
+## Agent process cleanup
+
+Agent-run builds can leave long-lived Java processes behind even after the
+command returns: a Gradle daemon and, after Kotlin compilation, a
+`KotlinCompileDaemon`. Close them before ending a task so the machine is not
+left holding build daemon memory.
+
+- Prefer `./gradlew --no-daemon ...` for one-off agent builds.
+- If a daemon was started, run `./gradlew --stop`.
+- Inspect with `jps -lv`; if a `KotlinCompileDaemon` started for this work
+  remains, terminate that PID explicitly.
+- Never kill unrelated Java processes, an IDE's build daemon, Signal/desktop
+  services, or other user work. Only stop build processes you started.
+- Confirm with `jps -lv`/`ps` that no Gradle/Kotlin build daemon remains; `jps`
+  itself exiting is normal.
+
 ## CI and platform coverage
 
 [Android verification](../.github/workflows/android-verify.yml) runs the canonical

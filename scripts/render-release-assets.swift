@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-// Code-native release graphics, using the same supplied artwork as Android.
+// Release artwork uses the launcher icon and supplied in-app screenshot.
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let output = root.appendingPathComponent("docs/assets/releases")
 try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
@@ -29,17 +29,31 @@ try canvas("luno-mobile-banner.png", width: 1600, height: 400) {
     let bounds = NSRect(x: 0, y: 0, width: 1600, height: 400)
     let frame = NSBezierPath(roundedRect: bounds, xRadius: 28, yRadius: 28)
     NSGradient(starting: color(0x171322), ending: color(0x0C0C13))!.draw(in: frame, angle: 0)
+    let screenshot = NSImage(contentsOf: output.appendingPathComponent("luno-mobile-screen.jpg"))!
+    let deviceBounds = NSRect(x: 1328, y: 5, width: 204, height: 390)
+    let device = NSBezierPath(roundedRect: deviceBounds, xRadius: 30, yRadius: 30)
     NSGraphicsContext.saveGraphicsState()
-    frame.addClip()
-    color(0x211735).setFill()
-    NSBezierPath(ovalIn: NSRect(x: 1260, y: -180, width: 640, height: 640)).fill()
-    color(0x34204F).setStroke()
-    for offset in stride(from: 0, through: 140, by: 35) {
-        let ring = NSBezierPath(ovalIn: NSRect(x: 1300 + offset, y: -140 + offset,
-            width: 560 - offset * 2, height: 560 - offset * 2))
-        ring.lineWidth = 2
-        ring.stroke()
-    }
+    let shadow = NSShadow()
+    shadow.shadowColor = NSColor.black.withAlphaComponent(0.7)
+    shadow.shadowBlurRadius = 22
+    shadow.shadowOffset = NSSize(width: 0, height: -8)
+    shadow.set()
+    color(0x17141D).setFill()
+    device.fill()
+    NSGraphicsContext.restoreGraphicsState()
+    color(0x5D4A7B).setStroke()
+    device.lineWidth = 2
+    device.stroke()
+
+    let screenHeight: CGFloat = 360
+    let screenWidth = screenHeight * screenshot.size.width / screenshot.size.height
+    let screenBounds = NSRect(x: deviceBounds.midX - screenWidth / 2, y: 20,
+        width: screenWidth, height: screenHeight)
+    let screen = NSBezierPath(roundedRect: screenBounds, xRadius: 12, yRadius: 12)
+    NSGraphicsContext.saveGraphicsState()
+    screen.addClip()
+    screenshot.draw(in: screenBounds, from: NSRect(origin: .zero, size: screenshot.size),
+        operation: .sourceOver, fraction: 1)
     NSGraphicsContext.restoreGraphicsState()
     let icon = NSImage(contentsOf: root.appendingPathComponent("app/src/main/res/drawable-nodpi/luno_launcher_art.png"))!
     NSGraphicsContext.saveGraphicsState()

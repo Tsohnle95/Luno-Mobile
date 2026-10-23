@@ -98,7 +98,8 @@ credentials or signing material are needed.
 
 Brand images are committed under `docs/assets/releases/`. To regenerate them on
 macOS, run `swift scripts/render-release-assets.swift` from the repository root.
-The renderer uses the same supplied logo artwork as the Android launcher.
+The banner combines the launcher logo with the supplied app screen in
+`docs/assets/releases/luno-mobile-screen.jpg`.
 Run `python3 -m unittest discover -s scripts/tests -v` to check download URLs,
 requirements, checksum output, refresh idempotence and the limited API mutation.
 

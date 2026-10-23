@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -109,11 +110,20 @@ fun PlaylistDetailScreen(
     // The saved order remains the default; the explicit Recently added option
     // sorts by each track's library-added timestamp.
     var sortMode by rememberSaveable { mutableStateOf(TrackSortMode.PLAYLIST_ORDER) }
+    val trackListState = rememberLazyListState()
 
     // In-playlist search filters both the track list and its play context.
     var query by rememberSaveable { mutableStateOf("") }
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var favoritesFirst by rememberSaveable { mutableStateOf(false) }
+
+    // Changing order must reveal its new head. Without this, a user scrolled
+    // down in playlist order stays at that index after choosing Recently
+    // added, so the newest downloads appear to be missing.
+    LaunchedEffect(sortMode, favoritesFirst) {
+        trackListState.scrollToItem(0)
+    }
+
     var selectionMode by remember { mutableStateOf(false) }
     var selectedUris by remember { mutableStateOf(setOf<String>()) }
     var actionsTrack by remember { mutableStateOf<Track?>(null) }
@@ -209,6 +219,7 @@ fun PlaylistDetailScreen(
     }
 
     LazyColumn(
+        state = trackListState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = Dimens.paddingXLarge)
     ) {

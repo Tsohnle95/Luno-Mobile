@@ -45,7 +45,9 @@ class LibraryRepository(
     private val thumbnailArtwork: suspend (String) -> String? = { url ->
         artworkFetchService.fetchBestAndSaveImage(context, url)
     },
-    private val downloadJobDao: DownloadJobDao? = null
+    private val downloadJobDao: DownloadJobDao? = null,
+    private val metadataProbe: (Uri) -> AudioMetadata = { readAudioMetadata(context, it) },
+    private val metadataTimeoutMs: Long = 20_000L
 ) {
     /**
      * Imports a single audio document.
@@ -780,6 +782,7 @@ class LibraryRepository(
     }.getOrNull()
 
     private fun isAudio(mime: String, name: String): Boolean {
+        if (name.startsWith("._")) return false
         if (mime.startsWith("audio/")) return true
         val ext = name.substringAfterLast('.', "").lowercase()
         return ext in AUDIO_EXTENSIONS
@@ -794,14 +797,37 @@ class LibraryRepository(
      * When the timeout fires the stuck thread is abandoned (it may never
      * finish) and a filename-based fallback track is imported instead.
      */
-    private suspend fun extractMetadata(uri: Uri): Track =
-        withAbandonableTimeout(EXTRACTION_TIMEOUT_MS) { extractMetadataBlocking(uri) }
-            ?: Track(
-                uri = uri.toString(),
-                title = "Unknown Track",
-                artist = "Unknown Artist",
-                addedAt = System.currentTimeMillis()
-            )
+    private suspend fun extractMetadata(
+        uri: Uri,
+        includeArtwork: Boolean = true,
+        timeoutMs: Long = metadataTimeoutMs
+    ): Track {
+        // Preserve filename identity before any native probe can stall. SAF
+        // document IDs retain paths even when the provider query is wedged.
+        val uriName = audioFileName(uri).takeIf { it.substringAfterLast('.', "").lowercase() in AUDIO_EXTENSIONS }
+        val displayName = uriName ?: withAbandonableTimeout(2_000) {
+            runCatching { documentDisplayName(uri) }.getOrNull()
+        }
+        val fallback = filenameMetadata(displayName.orEmpty().takeIf {
+            it.substringAfterLast('.', "").lowercase() in AUDIO_EXTENSIONS
+        }.orEmpty())
+        val embedded = withAbandonableTimeout(timeoutMs) {
+            runCatching { metadataProbe(uri) }.getOrNull()
+        }
+        val track = Track(
+            uri = uri.toString(),
+            title = embedded?.title?.takeUnless(::missingTitle)
+                ?: fallback.title.takeUnless(::missingTitle) ?: "Unknown Track",
+            artist = embedded?.artist?.takeUnless(::missingArtist)
+                ?: fallback.artist.takeUnless(::missingArtist) ?: "Unknown Artist",
+            durationMs = embedded?.durationMs?.coerceAtLeast(0) ?: 0
+        )
+        // Artwork must never consume the metadata deadline or erase names.
+        val art = if (includeArtwork) withAbandonableTimeout(5_000) {
+            runCatching { ArtworkStorage.saveEmbeddedArtwork(context, uri) }.getOrNull()
+        } else null
+        return track.copy(albumArtPath = art)
+    }
 
     /**
      * Runs [block] on [executor] with a hard timeout and returns `null`
@@ -841,86 +867,68 @@ class LibraryRepository(
     private suspend fun <T> withListingTimeout(timeoutMs: Long, block: () -> T): T? =
         withExecutorTimeout(listingExecutor, timeoutMs, block)
 
-    private fun extractMetadataBlocking(uri: Uri): Track {
-        val cursor = context.contentResolver.query(uri, null, null, null, null)
-        var title = "Unknown Track"
-        var artist = "Unknown Artist"
-        var durationMs = 0L
-
-        cursor?.use { c ->
-            if (c.moveToFirst()) {
-                val nameIndex = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (nameIndex >= 0) {
-                    val fileName = c.getString(nameIndex) ?: "Unknown"
-                    title = fileName.removeSuffix(".mp3")
-                        .removeSuffix(".wav")
-                        .removeSuffix(".flac")
-                        .removeSuffix(".ogg")
-                        .removeSuffix(".m4a")
-                        .removeSuffix(".aac")
-                        .removeSuffix(".wma")
-                    // Try to split "Artist - Title" pattern
-                    val parts = title.split(" - ", limit = 2)
-                    if (parts.size == 2) {
-                        artist = parts[0].trim()
-                        title = parts[1].trim()
-                    }
-                }
-                // Try to get duration from documents provider if available
-                val durationIndex = c.getColumnIndex("duration")
-                if (durationIndex >= 0) {
-                    durationMs = c.getLong(durationIndex)
-                }
-            }
-        }
-
-            // Try MediaMetadataRetriever for more accurate metadata
-        val retriever = android.media.MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context, uri)
-            val extractedTitle = retriever.extractMetadata(
-                android.media.MediaMetadataRetriever.METADATA_KEY_TITLE
-            )
-            val extractedArtist = retriever.extractMetadata(
-                android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST
-            )
-            val extractedDuration = retriever.extractMetadata(
-                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
-            )
-            val albumArtPath = ArtworkStorage.saveEmbeddedArtwork(context, uri)
-
-            if (!extractedTitle.isNullOrBlank()) title = extractedTitle
-            if (!extractedArtist.isNullOrBlank()) artist = extractedArtist
-            if (!extractedDuration.isNullOrBlank()) {
-                durationMs = extractedDuration.toLongOrNull() ?: durationMs
-            }
-
-            Track(
-                uri = uri.toString(),
-                title = title,
-                artist = artist,
-                durationMs = durationMs,
-                albumArtPath = albumArtPath,
-                addedAt = System.currentTimeMillis()
-            )
-        } catch (_: Exception) {
-            // Metadata extraction failed, use file-name-based fallback
-            Track(
-                uri = uri.toString(),
-                title = title,
-                artist = artist,
-                durationMs = durationMs,
-                addedAt = System.currentTimeMillis()
-            )
-        } finally {
-            // release() must ALWAYS run: a leaked native retriever leaks
-            // file descriptors and native memory — over a large import
-            // that accumulates until the app is killed.
-            runCatching { retriever.release() }
-        }
-    }
-
     fun getAllTracks() = trackDao.getAllTracks()
+
+    suspend fun repairMissingMetadata(
+        onProgress: (scanned: Int, total: Int, updated: Int) -> Unit = { _, _, _ -> }
+    ): MetadataRepairResult = withContext(Dispatchers.IO) {
+        val allTracks = trackDao.getAllTracksOnce()
+        val sidecars = allTracks.filter { audioFileName(Uri.parse(it.uri)).startsWith("._") }
+            .map { it.uri }.toSet()
+        val candidates = allTracks.filter {
+            it.uri !in sidecars && (missingTitle(it.title) || missingArtist(it.artist) || it.durationMs == 0L)
+        }
+        // Fail before touching Room if the private, URI-preserving recovery
+        // snapshot cannot be written. Transfer JSON intentionally omits URIs.
+        val directory = java.io.File(context.filesDir, "metadata-repairs").apply { mkdirs() }
+        val backup = java.io.File(directory, "before-${java.util.UUID.randomUUID()}.json")
+        val snapshot = org.json.JSONObject().put("format", "luno.metadata-repair.backup.v1")
+            .put("tracks", org.json.JSONArray(allTracks.map { track ->
+                org.json.JSONObject().put("uri", track.uri).put("title", track.title)
+                    .put("artist", track.artist).put("album", track.album)
+                    .put("durationMs", track.durationMs).put("albumArtPath", track.albumArtPath ?: org.json.JSONObject.NULL)
+                    .put("isFavorite", track.isFavorite).put("playCount", track.playCount)
+                    .put("addedAt", track.addedAt)
+            }))
+            .put("memberships", org.json.JSONArray(playlistDao?.getAllPlaylistTracksOnce().orEmpty().map {
+                org.json.JSONObject().put("playlistId", it.playlistId)
+                    .put("trackUri", it.trackUri).put("sortOrder", it.sortOrder)
+            }))
+        java.io.FileOutputStream(backup).use { stream ->
+            stream.write(snapshot.toString().toByteArray(Charsets.UTF_8))
+            stream.fd.sync()
+        }
+        val jobs = downloadJobDao?.getCompletedDownloadsOnce().orEmpty()
+        val jobsByUri = jobs.groupBy { it.localUri }
+        val jobsByDocument = jobs.filter { documentIdOf(it.localUri) != null }
+            .groupBy { documentIdOf(it.localUri) }
+        var updated = 0
+        val changedUris = mutableListOf<String>()
+        onProgress(0, candidates.size, 0)
+        candidates.forEachIndexed { index, before ->
+            val job = (jobsByUri[before.uri]
+                ?: documentIdOf(before.uri)?.let { jobsByDocument[it] })
+                ?.maxByOrNull { it.completedAt }
+            val read = extractMetadata(Uri.parse(before.uri), includeArtwork = false, timeoutMs = minOf(metadataTimeoutMs, 5_000))
+            val title = if (missingTitle(before.title)) {
+                job?.title?.takeUnless(::missingTitle) ?: read.title.takeUnless(::missingTitle).orEmpty()
+            } else ""
+            val artist = if (missingArtist(before.artist)) {
+                job?.artist?.takeUnless(::missingArtist) ?: read.artist.takeUnless(::missingArtist).orEmpty()
+            } else ""
+            val changed = trackDao.repairMetadata(
+                before.uri, before.title, before.artist, title, artist,
+                if (before.durationMs == 0L) read.durationMs else 0L
+            )
+            updated += changed
+            if (changed > 0) changedUris += before.uri
+            onProgress(index + 1, candidates.size, updated)
+        }
+        val remaining = trackDao.getAllTracksOnce().filter { it.uri !in sidecars }
+        MetadataRepairResult(updated, remaining.count { missingTitle(it.title) },
+            remaining.count { missingArtist(it.artist) }, sidecars.size, backup.absolutePath,
+            changedUris.chunked(500).flatMap { trackDao.getTracksByUris(it) })
+    }
 
     fun searchTracks(query: String) = trackDao.searchTracks(query)
 
@@ -1043,7 +1051,7 @@ class LibraryRepository(
                         null
                     }
                 if (!path.isNullOrBlank()) {
-                    trackDao.updateTrack(track.copy(albumArtPath = path))
+                    trackDao.setArtwork(track.uri, path)
                     updated++
                 }
             }
@@ -1078,7 +1086,7 @@ class LibraryRepository(
             val best = candidates.maxByOrNull(ArtworkStorage::qualityScore)
             val bestScore = ArtworkStorage.qualityScore(best)
             if (best != null && bestScore > currentScore) {
-                trackDao.updateTrack(track.copy(albumArtPath = best))
+                trackDao.setArtwork(track.uri, best)
                 updated++
             }
             candidates.filter { it != best || bestScore <= currentScore }.forEach { candidate ->
@@ -1162,10 +1170,6 @@ class LibraryRepository(
         /** Bounded parallelism for folder imports (one bad file can't stall
          *  a whole 4k-song import, and the run is 3-4x faster). */
         private const val PARALLELISM = 4
-
-        /** Hard cap per file for metadata/artwork extraction; on timeout the
-         *  stuck thread is abandoned and a filename-based track is imported. */
-        private const val EXTRACTION_TIMEOUT_MS = 20_000L
 
         /** Hard cap per DocumentsProvider query (folder listings); on timeout
          *  the folder is treated as empty rather than hanging the import. */

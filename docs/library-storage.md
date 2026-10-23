@@ -27,8 +27,10 @@ and artwork caches. Does not own [job execution](downloads.md),
 [schema history](../app/schemas/com.luno.mobile.data.db.AppDatabase/) own the
 database shape/version; retain explicit migrations and every historic snapshot.
 Tracks are keyed by playable URI; membership uses playlist ID + track URI with
-cascading foreign keys. REPLACE track inserts differ from IGNORE membership
-inserts; inspect effects on relationships when changing insertion behavior.
+cascading foreign keys. `Track.videoId` is durable YouTube provenance used by
+playlist sync, so a completed download remains recognizable after job-history
+cleanup. REPLACE track inserts differ from IGNORE membership inserts; inspect
+effects on relationships when changing insertion behavior.
 Playlist membership adds are duplicate-aware: `PlaylistRepository` returns
 `ADDED`/`ALREADY_PRESENT` for one song and an added/already-present summary for
 batches, while the DAO still inserts with IGNORE for atomic concurrency safety.
@@ -109,7 +111,9 @@ context so Next/Previous follows the visible song order.
 Playlist detail uses a viewport-relative tall cover with a bottom fade, no app
 wordmark or top back arrow, a compact purple Play control, and a horizontal-dot
 sort menu. Search, shuffle, favorites-first and sort semantics remain unchanged.
-Android Back owns return navigation.
+Changing sort mode or favorites-first returns the list to its top, so switching
+from playlist order to Recently added reveals the newest rows instead of
+retaining the old scroll index. Android Back owns return navigation.
 
 ## SAF flow, failures and recovery
 
@@ -123,6 +127,30 @@ bad listings/hangs. Unlistable folders count as errors. The manager's stall
 watchdog resolves visible progress/warns while work can continue; do not treat
 that as WorkManager persistence or guaranteed completion.
 
+Audio import rejects macOS `._` sidecars even when their extension/MIME claims
+audio. Filename identity is retained before the bounded native metadata probe;
+artwork extraction has a separate deadline and cannot erase recovered names.
+An unreadable tag or timeout therefore falls back to the original filename,
+rather than publishing an unnecessary Unknown Track placeholder.
+
+**Settings → Library → Repair missing song details** retries incomplete records
+through [LibraryRepository](../app/src/main/java/com/luno/mobile/data/repository/LibraryRepository.kt).
+It uses exact completed-download URI/document identity, embedded tags, then
+filename metadata. It never guesses from remote search or overwrites valid
+fields. Before mutation it writes a synced private JSON snapshot under
+`filesDir/metadata-repairs`, retaining original URI, metadata, favorite/history
+fields and ordered playlist memberships. Failure to save the snapshot aborts
+repair. Conditional column updates preserve user edits made during the scan and
+leave other track fields and relationships untouched. Artwork writers also
+update only the artwork column, so stale scans cannot revert repaired names.
+The application-owned [MetadataRepairManager](../app/src/main/java/com/luno/mobile/ui/shell/MetadataRepairManager.kt)
+keeps progress across navigation and reports unresolved titles/artists and
+skipped sidecars. Existing sidecar rows and all source audio remain untouched;
+retry is safe after interruption. Process death stops the scan; it is not a
+durable WorkManager job. [MetadataRecoveryTest](../app/src/test/java/com/luno/mobile/data/repository/MetadataRecoveryTest.kt)
+covers timeout fallback, sidecar rejection, exact provenance, field preservation,
+backup failure, concurrent edits, stale artwork and repeat runs.
+
 Folder copies need actual persisted **read and write** grants. Revocation,
 provider failures and collisions require inspecting `reuseExisting` versus
 `overwriteExisting`; these are distinct retry/promotion behaviors. Failed copy
@@ -134,8 +162,10 @@ to repair missing grants. Reselect the tree and retry through normal owners.
 
 [ArtworkStorage](../app/src/main/java/com/luno/mobile/data/artwork/ArtworkStorage.kt)
 stores recoverable images in private `filesDir/artwork`; `Track.albumArtPath`
-references them. Missing-art repair tries embedded art, completed-download
-thumbnails, then remote cover search via
+references them. Artwork never belongs in the selected SAF media tree: download,
+preview promotion and folder sync copy playable audio only, because that tree may
+be a camera roll or other user media folder. Missing-art repair tries embedded
+art, completed-download thumbnails, then remote cover search via
 [ArtworkFetchService](../app/src/main/java/com/luno/mobile/data/artwork/ArtworkFetchService.kt).
 The Settings quality scan tries larger YouTube thumbnails and cover search;
 upgrade replaces a cached image only when decoded pixel area improves.
@@ -171,8 +201,12 @@ Home and Library share the purple L profile/settings button. The launcher uses
 the provided purple L artwork in adaptive and density-specific Android assets.
 The Library filter row also exposes library-wide play: normal mode starts the
 first track in the selected sort order; a one-second hold toggles shuffle for
-subsequent taps. This action ignores search and filter projections and sends the
-complete library queue; playlist playback retains its own context.
+subsequent taps. Shuffle state is visibly distinct — an accent ring and a
+green shuffle badge on the play button — and the hold briefly shows a
+green "Shuffle enabled" or red "Shuffle off" label above it for one second.
+The circular background is clipped, not the whole button box, so the badge and
+feedback remain visible. This action ignores search and filter projections and
+sends the complete library queue; playlist playback retains its own context.
 
 Navigation's destination-driven cover observes back-stack entry identity, so
 system Back, restored tabs and explicit navigation all cover the incoming

@@ -9,6 +9,7 @@ val SurfaceElevated = Color(0xFF292929)
 val PrimaryText = Color(0xFFFFFFFF)
 val SecondaryText = Color(0xFFB3B3B3)
 val AccentGreen = Color(0xFF1ED760)
+val AccentRed = Color(0xFFFF5C5C)
 val PlayerPurple = Color(0xFF6849D5)
 
 // Navigation bar

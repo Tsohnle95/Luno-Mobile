@@ -15,7 +15,9 @@ data class Track(
     val albumArtPath: String? = null,
     val playCount: Int = 0,
     val isFavorite: Boolean = false,
-    val addedAt: Long = System.currentTimeMillis()
+    val addedAt: Long = System.currentTimeMillis(),
+    /** Original YouTube videoId for durable playlist-sync identity. */
+    val videoId: String = ""
 ) {
     /** `file://` URI of the cached artwork, or `null` when unavailable. */
     fun albumArtUri(): String? =

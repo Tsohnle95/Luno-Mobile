@@ -30,9 +30,12 @@ SAF copy. Track + memberships + completed job publish in a Room transaction.
 Successful SAF copy becomes the playable URI; redundant private audio is
 removed after commit. Failed SAF copy retains usable private audio and completes
 with actual-destination notice; provider failure is not a network retry.
-Artwork is best effort. Ordinary streaming writes directly to private output;
-duration extraction failure may yield zero and still complete. Do not claim
-full media validation or atomic filesystem/database publication.
+Artwork is best effort and stays in the private `filesDir/artwork` cache. Never
+copy thumbnails/JPEGs into the selected SAF tree: that tree can be a media or
+camera-roll folder, and the user only asked for music there. Ordinary streaming
+writes directly to private output; duration extraction failure may yield zero
+and still complete. Do not claim full media validation or atomic
+filesystem/database publication.
 
 Cancellation cleans output and marks Room cancellation in `NonCancellable`.
 Network IO retries are bounded by worker attempt policy. `LunoApp` reconciles at
@@ -44,12 +47,22 @@ with the Track. Follow Room → worker → reconciliation → LibraryData/UI tog
 ## Sync producers and promotion
 
 [PlaylistSyncWorker](../app/src/main/java/com/luno/mobile/playback/PlaylistSyncWorker.kt)
-enumerates YouTube playlist entries, reuses library tracks, adds membership,
-deduplicates jobs using persisted video identity plus legacy URL matching, then
-enqueues independent download workers tagged by playlist. Stop All/per-playlist
-cancel must stop producers **and** consumers; cancelling one consumer alone can
-allow the producer to enqueue more. Provenance changes also affect
-[transfer export](../contracts/library-export/v1/README.md).
+enumerates YouTube playlist entries and delegates reconciliation to
+[PlaylistSyncPlanner](../app/src/main/java/com/luno/mobile/playback/PlaylistSyncPlanner.kt).
+A video is recognized by `Track.videoId`, then by the surviving track of a
+completed job, then by legacy metadata: normalized artist/title, or exact
+normalized title plus duration when the old artist was never recovered. The
+title+duration fallback requires a non-zero duration within 3 seconds and is not
+a general fuzzy search. Completed downloads are reused instead of re-enqueued,
+repeated playlist entries share one download, and rows proven to share one
+videoId are merged (memberships/favorites/history preserved) before new work
+starts. Legacy sync rows without provenance merge into the single proven row with
+matching normalized artist/title or title+duration, or into an exact title/artist
+group; ambiguous versions are left for manual review. `Track.videoId` is schema
+12 provenance and must survive job-history cleanup. Then the worker enqueues
+independent download workers tagged by playlist. Stop All/per-playlist cancel must stop producers **and** consumers;
+cancelling one consumer alone can allow the producer to enqueue more. Provenance
+changes also affect [transfer export](../contracts/library-export/v1/README.md).
 
 `promotePreview` canonicalizes a source under the private preview-cache root,
 requires a still-existing destination playlist, copies to a unique durable
@@ -94,6 +107,13 @@ that payload size against production defaults.
 [DownloadRepositoryTest](../app/src/test/java/com/luno/mobile/data/repository/DownloadRepositoryTest.kt)
 covers orphan reconciliation, URL rejection, destination/thumbnail durability,
 Unsorted repair, unique preview paths and promotion rollback.
+[PlaylistSyncPlannerTest](../app/src/test/java/com/luno/mobile/playback/PlaylistSyncPlannerTest.kt)
+reproduces repeated sync, completed-job reuse, duplicate video entries,
+provenance merge, legacy-row repair (normalized artist/title and unknown-artist
+title+duration), duration discrimination, exact duplicate consolidation and the
+no-fuzzy-title rule.
+[DownloadedArtworkDestinationTest](../app/src/test/java/com/luno/mobile/data/repository/DownloadedArtworkDestinationTest.kt)
+pins audio-only SAF publication for preview promotion and library-folder sync.
 [ParallelRangeDownloaderTest](../app/src/test/java/com/luno/mobile/playback/ParallelRangeDownloaderTest.kt)
 covers assembly, unsupported/malformed ranges, clean fallback, cancellation and
 the typical-song size path that must select ranges.

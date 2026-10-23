@@ -32,8 +32,9 @@ class SortChipTest {
             Track(uri = "new", title = "New", addedAt = 200L)
         )
 
-        assertThat(tracks.sortedByPlaylistMembership(listOf("new", "old")).map { it.uri })
-            .containsExactly("new", "old")
+        // Sync append order and library-added time deliberately disagree here.
+        assertThat(tracks.sortedByPlaylistMembership(listOf("old", "new")).map { it.uri })
+            .containsExactly("old", "new")
             .inOrder()
         assertThat(tracks.sortedByMode(TrackSortMode.RECENT).map { it.uri })
             .containsExactly("new", "old")

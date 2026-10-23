@@ -62,6 +62,8 @@ class LunoApp : Application(), Configuration.Provider {
         private set
     lateinit var artworkFetchManager: ArtworkFetchManager
         private set
+    lateinit var metadataRepairManager: com.luno.mobile.ui.shell.MetadataRepairManager
+        private set
     lateinit var recommendationPreviewManager: RecommendationPreviewManager
         private set
     lateinit var libraryData: LibraryData
@@ -162,6 +164,7 @@ class LunoApp : Application(), Configuration.Provider {
             libraryRepository = libraryRepository,
             context = this
         )
+        metadataRepairManager = com.luno.mobile.ui.shell.MetadataRepairManager(appScope, libraryRepository)
         recommendationPreviewManager = RecommendationPreviewManager(
             context = this,
             appScope = appScope,

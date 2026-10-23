@@ -60,34 +60,13 @@ class PlaylistSyncWorker(
 
                 if (videos.isEmpty()) return Result.success()
 
-                val existingTracks = trackDao.getAllTracksOnce()
+                val planner = PlaylistSyncPlanner(trackDao, playlistDao, jobDao)
+                val plan = planner.plan(playlistId, videos)
 
                 var newCount = 0
                 var errorCount = 0
-                for (video in videos) {
+                for (video in plan.videosToDownload) {
                     if (isStopped) break
-
-                    val existing = existingTracks.firstOrNull {
-                        it.title.contains(video.title, ignoreCase = true) ||
-                        it.uri.contains(video.videoId, ignoreCase = true)
-                    }
-                    if (existing != null) {
-                        // Track already in the library — make sure it is in
-                        // this playlist (idempotent via IGNORE conflict).
-                        val sortOrder = playlistDao.maxSortOrder(playlistId) + 1
-                        playlistDao.addTrackToPlaylist(
-                            com.luno.mobile.data.db.entity.PlaylistTrack(
-                                playlistId = playlistId,
-                                trackUri = existing.uri,
-                                sortOrder = sortOrder
-                            )
-                        )
-                        continue
-                    }
-
-                    // Prefer durable videoId check, fall back to legacy sourceUrl LIKE.
-                    val queuedCount = try { jobDao.countByVideoId(video.videoId) } catch (_: Exception) { 0 }
-                    if (queuedCount > 0 || jobDao.countByVideoQuery(video.videoId) > 0) continue
 
                     val audioResult = WebSearchService.getAudioStreamUrl(video.videoId)
                     when (audioResult) {
@@ -97,6 +76,16 @@ class PlaylistSyncWorker(
                             continue
                         }
                         is ExtractionResult.Success -> {
+                            // Extraction can be slow. Re-check before writing
+                            // so a concurrent sync or a just-finished download
+                            // cannot create a second library row for the video.
+                            val racedTrack = planner.findExistingTrack(video)
+                            if (racedTrack != null) {
+                                planner.addMembership(playlistId, racedTrack.uri)
+                                continue
+                            }
+                            if (planner.hasActiveDownload(video.videoId)) continue
+
                             val trackTitleParts = video.title.split(" - ", limit = 2)
                             val artist = if (trackTitleParts.size > 1) trackTitleParts[0].trim() else video.artist
                             val trackTitle = if (trackTitleParts.size > 1) trackTitleParts[1].trim() else video.title
@@ -152,7 +141,12 @@ class PlaylistSyncWorker(
                     }
                 }
 
-                Log.d(TAG, "Playlist sync complete: $newCount new, $errorCount errors")
+                Log.d(
+                    TAG,
+                    "Playlist sync complete: $newCount new, $errorCount errors, " +
+                        "${plan.reusedTracks} reused, ${plan.alreadyQueued} already queued, " +
+                        "${plan.mergedDuplicates} duplicate downloads merged"
+                )
                 return Result.success()
             }
         }

@@ -1,5 +1,12 @@
 # Playback, session and discovery previews
 
+Metadata replacement and initial session queue restoration update player
+projections without incrementing library play counts. Explicit playback starts,
+including a restart of the same song, still count. The Media3 controller tracks
+the explicit start separately from playlist-change events, which also occur when
+recovered metadata replaces the open player's item. This prevents metadata
+repair/editing from becoming a listening event or resetting its progress.
+
 Owns Media3 session/control contracts, queue/recent-history policy and temporary
 discovery lifecycle. Does not own [Room library](library-storage.md), permanent
 [download publication](downloads.md), or release installation.

@@ -130,6 +130,7 @@ class MusicController @JvmOverloads constructor(
     private var controller: MediaController? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var progressUpdater: Job? = null
+    private var explicitStartUri: String? = null
 
     /** Monotonically increasing generation; incremented on every [release]. */
     private var generation = 0
@@ -184,9 +185,17 @@ class MusicController @JvmOverloads constructor(
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             try {
                 val metadata = mediaItem?.mediaMetadata
+                val previousUri = _currentTrack.value?.uri
+                val explicitStart = reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
+                    mediaItem != null && explicitStartUri == mediaItem.mediaId
+                if (explicitStart) explicitStartUri = null
+                val metadataRefresh = reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
+                    mediaItem != null && previousUri == mediaItem.mediaId && !explicitStart
+                val restoredItem = reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
+                    previousUri == null && !explicitStart
                 // The item we left just played (or was skipped past): it is no
                 // longer "up next", so drop it from the manual-queue set.
-                _currentTrack.value?.let { left -> manualQueueUris.remove(left.uri) }
+                if (!metadataRefresh) _currentTrack.value?.let { left -> manualQueueUris.remove(left.uri) }
                 _currentTrack.value = metadata?.let {
                     val sessionDuration = controller?.duration ?: 0L
                     MediaTrack(
@@ -202,14 +211,18 @@ class MusicController @JvmOverloads constructor(
                 }
                 _hasActiveItem.value = mediaItem != null
                 _duration.value = _currentTrack.value?.durationMs ?: 0L
-                _progress.value = 0L
+                if (!metadataRefresh) _progress.value = 0L
                 _currentTrack.value?.let { track ->
                     if (!track.isTransient) {
                         recordRecentlyPlayed(track)
                         val playlistId = mediaItem?.mediaMetadata?.extras
                             ?.takeIf { it.containsKey(METADATA_PLAYLIST_ID) }
                             ?.getLong(METADATA_PLAYLIST_ID)
-                        runCatching { onTrackPlayed(track.uri, playlistId) }
+                        // Media3 also emits transitions for metadata replacement
+                        // and restored queues. Neither is a new listening event.
+                        if (!metadataRefresh && !restoredItem) {
+                            runCatching { onTrackPlayed(track.uri, playlistId) }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -969,6 +982,7 @@ class MusicController @JvmOverloads constructor(
     fun clearPlaybackQueue() {
         if (released) return
         pendingRequest = null
+        explicitStartUri = null
         safePlayerCommand("clearPlaybackQueue") {
             controller?.let { ctrl ->
                 ctrl.stop()
@@ -1082,7 +1096,13 @@ class MusicController @JvmOverloads constructor(
             // session (the crash class of androidx/media#86), and shuffle
             // toggles right after the burst widen that window.
             val startIndex = request.startIndex.coerceIn(0, items.lastIndex)
-            ctrl.setMediaItems(items, startIndex, C.TIME_UNSET)
+            explicitStartUri = request.items[startIndex].uri
+            try {
+                ctrl.setMediaItems(items, startIndex, C.TIME_UNSET)
+            } catch (error: Exception) {
+                explicitStartUri = null
+                throw error
+            }
             ctrl.prepare()
             ctrl.play()
             _shuffleEnabled.value = ctrl.shuffleModeEnabled

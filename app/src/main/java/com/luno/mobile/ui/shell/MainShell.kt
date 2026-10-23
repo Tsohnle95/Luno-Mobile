@@ -279,6 +279,33 @@ fun MainShell(
     // Missing-artwork sweep (Settings drawer) — live "Fetching missing
     // artwork… N/M" strip under the header, owned by ArtworkFetchManager.
     val artworkStatus by app.artworkFetchManager.status.collectAsState()
+    val metadataRepairStatus by app.metadataRepairManager.status.collectAsState()
+    LaunchedEffect(metadataRepairStatus) {
+        val finished = metadataRepairStatus as? MetadataRepairStatus.Finished
+        finished?.result?.updatedTracks?.forEach {
+            musicController.updateTrackMetadata(it.uri, it.title, it.artist)
+        }
+    }
+    when (val repair = metadataRepairStatus) {
+        is MetadataRepairStatus.Finished -> AlertDialog(
+            containerColor = SurfaceDark,
+            onDismissRequest = { app.metadataRepairManager.dismiss() },
+            title = { Text("Song details recovered") },
+            text = { Text("Updated ${repair.result.updated} songs. " +
+                "${repair.result.remainingTitles} titles and ${repair.result.remainingArtists} artists still need review. " +
+                "Skipped ${repair.result.sidecarsSkipped} macOS sidecar entries. " +
+                "A recovery backup was saved. Your audio, favorites and playlists were preserved.") },
+            confirmButton = { TextButton(onClick = { app.metadataRepairManager.dismiss() }) { Text("Done") } }
+        )
+        is MetadataRepairStatus.Failed -> AlertDialog(
+            containerColor = SurfaceDark,
+            onDismissRequest = { app.metadataRepairManager.dismiss() },
+            title = { Text("Repair stopped") },
+            text = { Text(repair.message + ". Recovered details and the recovery backup are retained; you can retry.") },
+            confirmButton = { TextButton(onClick = { app.metadataRepairManager.dismiss() }) { Text("Close") } }
+        )
+        else -> Unit
+    }
     val folderImportLauncher = rememberLauncherForActivityResult(
         // OpenDocumentTree requests a persistable tree grant with READ and
         // WRITE modes; MusicFolderImportManager persists both modes so the
@@ -542,6 +569,15 @@ fun MainShell(
                         onClick = {
                             scope.launch { drawerState.close() }
                             app.artworkFetchManager.start()
+                        }
+                    )
+                    DrawerItem(
+                        icon = Icons.Filled.Sync,
+                        label = if (metadataRepairStatus is MetadataRepairStatus.Progress)
+                            "Repairing song details…" else "Repair missing song details",
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            app.metadataRepairManager.start()
                         }
                     )
                     DrawerItem(
@@ -825,6 +861,14 @@ fun MainShell(
                         null -> Unit
                     }
 
+                    (metadataRepairStatus as? MetadataRepairStatus.Progress)?.let { repair ->
+                        Text(
+                            "Recovering song details… ${repair.scanned}/${repair.total} (${repair.updated} updated)",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = Dimens.paddingLarge, vertical = Dimens.paddingSmall)
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()

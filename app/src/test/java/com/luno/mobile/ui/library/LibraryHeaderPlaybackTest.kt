@@ -8,6 +8,7 @@ import com.google.common.truth.Truth.assertThat
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import com.luno.mobile.ui.components.TrackSortMode
 import com.luno.mobile.ui.theme.LunoTheme
 import org.junit.Rule
@@ -43,11 +44,14 @@ class LibraryHeaderPlaybackTest {
             down(center); advanceEventTime(1100); up()
         }
         compose.runOnIdle { assertThat(plays).isEqualTo(0); assertThat(shuffle.value).isTrue() }
+        compose.onNodeWithText("Shuffle enabled").assertIsDisplayed()
         compose.onNodeWithContentDescription("Shuffle library").performClick()
         compose.runOnIdle { assertThat(plays).isEqualTo(1) }
         compose.onNodeWithContentDescription("Shuffle library").performTouchInput {
             down(center); advanceEventTime(1100); up()
         }
+        compose.runOnIdle { assertThat(shuffle.value).isFalse() }
+        compose.onNodeWithText("Shuffle off").assertIsDisplayed()
         compose.onNodeWithContentDescription("Play library").assertIsDisplayed()
     }
 }

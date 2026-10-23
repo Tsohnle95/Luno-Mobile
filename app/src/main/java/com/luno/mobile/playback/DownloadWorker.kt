@@ -72,7 +72,6 @@ class DownloadWorker(
         val playlistDao = db.playlistDao()
         var downloadedFile: File? = null
         var destinationUri: Uri? = null
-        var artworkDestinationUri: Uri? = null
         var destinationNotice = ""
 
         val job = jobDao.getDownload(jobId) ?: run {
@@ -358,31 +357,9 @@ class DownloadWorker(
                 destinationUri = null
                 destinationNotice = musicFolderRepository.destinationFailureNotice(e)
             }
-            if (destinationUri != null && albumArtPath != null) {
-                val artworkFile = File(albumArtPath)
-                if (artworkFile.isFile) {
-                    artworkDestinationUri = runCatching {
-                        MusicFolderRepository(context).copyFileToSelectedFolder(
-                            sourceFile = artworkFile,
-                            displayName = "$safeFileName.jpg",
-                            mimeType = "image/jpeg",
-                            reuseExisting = false,
-                            overwriteExisting = true
-                        )
-                    }.onFailure { error ->
-                        Log.w(TAG, "Could not sync artwork for download $jobId", error)
-                    }.getOrNull()
-                }
-            } else if (destinationUri == null && albumArtPath != null) {
-                // Keep a sidecar beside app-private audio as well as the
-                // shared artwork cache used by Luno's UI.
-                try {
-                    File(albumArtPath).takeIf { it.isFile }?.copyTo(
-                        File(downloadDir, "$safeFileName.jpg"),
-                        overwrite = true
-                    )
-                } catch (_: Exception) { }
-            }
+            // Artwork deliberately stays in the private filesDir cache. The
+            // selected SAF tree is the user's music/media folder (sometimes a
+            // camera-roll tree); writing JPEG sidecars there pollutes it.
             val trackUri = destinationUri?.toString() ?: file.toURI().toString()
 
             val track = Track(
@@ -391,7 +368,8 @@ class DownloadWorker(
                 artist = job.artist,
                 durationMs = durationMs,
                 albumArtPath = albumArtPath,
-                addedAt = System.currentTimeMillis()
+                addedAt = System.currentTimeMillis(),
+                videoId = job.videoId
             )
             // Every download belongs to a playlist. Legacy jobs created before
             // Unsorted routing get repaired here before completion.
@@ -429,7 +407,7 @@ class DownloadWorker(
             return Result.success()
         } catch (e: IOException) {
             Log.e(TAG, "Download failed for job $jobId", e)
-            cleanupFailedOutput(downloadedFile, destinationUri, artworkDestinationUri)
+            cleanupFailedOutput(downloadedFile, destinationUri)
             if (isStopped) {
                 jobDao.markFailed(jobId, DownloadState.CANCELLED, "Cancelled")
                 return Result.failure()
@@ -460,7 +438,7 @@ class DownloadWorker(
                 Result.failure()
             }
         } catch (cancelled: CancellationException) {
-            cleanupFailedOutput(downloadedFile, destinationUri, artworkDestinationUri)
+            cleanupFailedOutput(downloadedFile, destinationUri)
             // Coroutine cancellation also cancels ordinary suspend calls. Use
             // NonCancellable so Room cannot retain a phantom active row.
             withContext(NonCancellable) {
@@ -471,7 +449,7 @@ class DownloadWorker(
             throw cancelled
         } catch (error: Exception) {
             Log.e(TAG, "Download finalization failed for job $jobId", error)
-            cleanupFailedOutput(downloadedFile, destinationUri, artworkDestinationUri)
+            cleanupFailedOutput(downloadedFile, destinationUri)
             jobDao.markFailed(
                 jobId,
                 DownloadState.FAILED,
@@ -484,13 +462,9 @@ class DownloadWorker(
         }
     }
 
-    private fun cleanupFailedOutput(
-        localFile: File?,
-        audioUri: Uri?,
-        artworkUri: Uri?
-    ) {
+    private fun cleanupFailedOutput(localFile: File?, audioUri: Uri?) {
         localFile?.delete()
-        listOfNotNull(artworkUri, audioUri).forEach { uri ->
+        audioUri?.let { uri ->
             runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
         }
     }

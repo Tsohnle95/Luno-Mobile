@@ -27,8 +27,8 @@ android {
         applicationId = "com.luno.mobile"
         minSdk = 29
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.0.17"
+        versionCode = 19
+        versionName = "1.0.18"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -94,7 +94,12 @@ tasks.withType<Test> {
     doFirst {
         file("${project.buildDir.absolutePath}/test-home").mkdirs()
     }
-    jvmArgs("-Duser.home=${project.buildDir.absolutePath}/test-home")
+    // Robolectric's ParcelFileDescriptor/FileDescriptor interceptor reflects
+    // into java.io on JDK 17; without this SAF round-trip tests fail on close.
+    jvmArgs(
+        "-Duser.home=${project.buildDir.absolutePath}/test-home",
+        "--add-opens=java.base/java.io=ALL-UNNAMED"
+    )
 }
 
 tasks.register("verifyReleaseVersion") {

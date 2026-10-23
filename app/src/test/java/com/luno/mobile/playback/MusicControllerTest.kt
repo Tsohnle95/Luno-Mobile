@@ -54,6 +54,44 @@ class MusicControllerTest {
     // ── Pending-play contract (pre-connection) ──────────────────────────
 
     @Test
+    fun `restored queue and metadata refresh do not add plays but explicit restarts do`() {
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        val played = mutableListOf<String>()
+        val connectedController = MusicController(context,
+            connector = MusicController.AsyncConnector { ctx -> MediaController.Builder(ctx, session.token).buildAsync() },
+            onTrackPlayed = { uri, _ -> played += uri })
+        val song = MediaTrack(uri = "file:///recovered.mp3", title = "Unknown Track", artist = "Unknown Artist")
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            player.setMediaItem(connectedController.buildMediaItem(song))
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(played).isEmpty()
+
+            connectedController.updateTrackMetadata(song.uri, "Recovered", "Artist")
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(played).isEmpty()
+            assertThat(connectedController.currentTrack.value?.title).isEqualTo("Recovered")
+
+            connectedController.play(song.copy(title = "Recovered", artist = "Artist"))
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(played).containsExactly(song.uri)
+            connectedController.updateTrackMetadata(song.uri, "Edited", "Artist")
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(played).containsExactly(song.uri)
+            connectedController.play(song.copy(title = "Edited", artist = "Artist"))
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(played).containsExactly(song.uri, song.uri)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
     fun `playUri returns true even before connection`() {
         assertThat(controller.playUri("http://example.com/track.mp3")).isTrue()
     }

@@ -43,7 +43,8 @@ class DownloadRepository(
     private val context: Context,
     private val playlistDao: PlaylistDao? = null,
     private val trackDao: TrackDao? = null,
-    private val database: AppDatabase? = null
+    private val database: AppDatabase? = null,
+    private val musicFolderRepository: MusicFolderRepository = MusicFolderRepository(context)
 ) {
     private val unsortedMutex = Mutex()
     private val artworkFetchService = ArtworkFetchService()
@@ -235,7 +236,7 @@ class DownloadRepository(
                 )
                 ?: return@forEach
             if (ArtworkStorage.hasUsableArtwork(artworkPath)) {
-                tracks.updateTrack(track.copy(albumArtPath = artworkPath))
+                tracks.setArtwork(track.uri, artworkPath)
             }
         }
     }
@@ -275,7 +276,6 @@ class DownloadRepository(
         val uniqueName = "${safeDownloadName(artist, title)}-${UUID.randomUUID()}"
         val stagedFile = File(downloadRoot, "$uniqueName.$extension")
         var destinationUri: Uri? = null
-        var artworkDestinationUri: Uri? = null
         var databaseCommitted = false
 
         try {
@@ -292,24 +292,14 @@ class DownloadRepository(
             }
 
             val mimeType = mimeTypeForExtension(extension)
-            destinationUri = MusicFolderRepository(context).copyFileToSelectedFolder(
+            // Artwork remains in the private cache; only playable audio is
+            // published to the user's selected SAF tree.
+            destinationUri = musicFolderRepository.copyFileToSelectedFolder(
                 sourceFile = stagedFile,
                 displayName = stagedFile.name,
                 mimeType = mimeType,
                 reuseExisting = false
             )
-            if (destinationUri != null && albumArtPath != null) {
-                File(albumArtPath).takeIf { it.isFile }?.let { artworkFile ->
-                    artworkDestinationUri = runCatching {
-                        MusicFolderRepository(context).copyFileToSelectedFolder(
-                            sourceFile = artworkFile,
-                            displayName = "${stagedFile.nameWithoutExtension}.jpg",
-                            mimeType = "image/jpeg",
-                            reuseExisting = false
-                        )
-                    }.getOrNull()
-                }
-            }
 
             val trackUri = destinationUri?.toString() ?: stagedFile.toURI().toString()
             val now = System.currentTimeMillis()
@@ -352,7 +342,7 @@ class DownloadRepository(
         } catch (error: Throwable) {
             stagedFile.delete()
             if (!databaseCommitted) {
-                listOfNotNull(artworkDestinationUri, destinationUri).forEach { uri ->
+                destinationUri?.let { uri ->
                     runCatching {
                         DocumentsContract.deleteDocument(context.contentResolver, uri)
                     }
@@ -393,22 +383,12 @@ class DownloadRepository(
                 }
 
                 try {
-                    val destinationUri = MusicFolderRepository(context)
+                    val destinationUri = musicFolderRepository
                         .copyFileToSelectedFolder(
                             sourceFile = sourceFile,
                             displayName = sourceFile.name,
                             mimeType = mimeTypeForExtension(sourceFile.extension)
                         ) ?: throw java.io.IOException("Choose a Music folder first")
-                    track.albumArtPath
-                        ?.let(::File)
-                        ?.takeIf { it.isFile }
-                        ?.let { artworkFile ->
-                            MusicFolderRepository(context).copyFileToSelectedFolder(
-                                sourceFile = artworkFile,
-                                displayName = "${sourceFile.nameWithoutExtension}.jpg",
-                                mimeType = "image/jpeg"
-                            )
-                        }
                     val newUri = destinationUri.toString()
                     val trackMemberships = memberships.filter { it.trackUri == track.uri }
 

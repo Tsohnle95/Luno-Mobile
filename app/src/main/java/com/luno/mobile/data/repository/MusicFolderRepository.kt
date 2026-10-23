@@ -16,7 +16,11 @@ import java.io.IOException
  */
 class MusicFolderRepository(
     context: Context,
-    private val permissionPersister: TreePermissionPersister = TreePermissionPersister.Default(context)
+    private val permissionPersister: TreePermissionPersister = TreePermissionPersister.Default(context),
+    private val permissionChecker: (Uri) -> Boolean = { uri ->
+        val grants = context.contentResolver.persistedUriPermissions.filter { it.uri == uri }
+        grants.any { it.isReadPermission } && grants.any { it.isWritePermission }
+    }
 ) {
 
     private val context = context.applicationContext
@@ -51,12 +55,8 @@ class MusicFolderRepository(
     fun loadTreeUri(): String? = prefs.getString(KEY_TREE_URI, null)
 
     /** True only when Android reports durable access for reading and writing the selected tree. */
-    fun hasPersistedReadWritePermission(uri: Uri? = loadTreeUri()?.let(Uri::parse)): Boolean {
-        if (uri == null) return false
-        val grants = context.contentResolver.persistedUriPermissions
-            .filter { it.uri == uri }
-        return grants.any { it.isReadPermission } && grants.any { it.isWritePermission }
-    }
+    fun hasPersistedReadWritePermission(uri: Uri? = loadTreeUri()?.let(Uri::parse)): Boolean =
+        uri != null && permissionChecker(uri)
 
     /** Copies a local file into the selected SAF folder and returns its URI. */
     fun copyFileToSelectedFolder(

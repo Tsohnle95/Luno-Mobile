@@ -81,6 +81,27 @@ git push origin v0.1.0
 6. The workflow verifies that the tag matches `versionName` and verifies the APK signature.
 7. A GitHub Release is created automatically with `Luno-Mobile-v0.1.0.apk` attached.
 
+## Download page presentation
+
+[release_page.py](scripts/release_page.py) renders the branded release body with
+the Android download button, requirements, file size, installation steps and
+SHA-256. The release workflow supplies the signed APK and tag; generated GitHub
+release notes are appended beneath the download page. Optional curated notes
+live in `.github/release-notes/vMAJOR.MINOR.PATCH.md`.
+
+The [presentation workflow](.github/workflows/release-presentation.yml) refreshes
+the latest stable release when presentation assets, notes or the renderer change
+on `main`; it can also be run manually. It patches only the release name/body,
+preserving the original changelog, APK assets, tag and publication state. Refresh
+is idempotent. It uses the existing repository-scoped Actions token; no local
+credentials or signing material are needed.
+
+Brand images are committed under `docs/assets/releases/`. To regenerate them on
+macOS, run `swift scripts/render-release-assets.swift` from the repository root.
+The renderer uses the same supplied logo artwork as the Android launcher.
+Run `python3 -m unittest discover -s scripts/tests -v` to check download URLs,
+requirements, checksum output, refresh idempotence and the limited API mutation.
+
 The Android app's **Home profile → Settings → App → Check for updates** entry shows
 the installed version and checks the latest stable GitHub release. **Download &
 install** requests Android's install permission first when needed. Enable **Allow

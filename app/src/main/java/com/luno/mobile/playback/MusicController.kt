@@ -60,6 +60,28 @@ class MusicController @JvmOverloads constructor(
         SharedPreferencesRecentlyPlayedStore(context)
 ) {
 
+    private val shufflePreferences = context.getSharedPreferences("context_shuffle", Context.MODE_PRIVATE)
+    private val _contextShuffle = MutableStateFlow(
+        shufflePreferences.all.mapNotNull { (key, value) -> (value as? Boolean)?.let { key to it } }.toMap()
+    )
+    val contextShuffle: StateFlow<Map<String, Boolean>> = _contextShuffle.asStateFlow()
+
+    fun shuffleFor(source: PlaybackSource): Boolean = _contextShuffle.value[source.shuffleKey()] ?: false
+
+    fun setContextShuffle(source: PlaybackSource, enabled: Boolean) {
+        if (released) return
+        rememberContextShuffle(source, enabled)
+        if (currentTrack.value?.playbackSource?.shuffleKey() == source.shuffleKey()) {
+            setShuffle(enabled)
+        }
+    }
+
+    private fun rememberContextShuffle(source: PlaybackSource, enabled: Boolean) {
+        val key = source.shuffleKey()
+        shufflePreferences.edit().putBoolean(key, enabled).apply()
+        _contextShuffle.value = _contextShuffle.value + (key to enabled)
+    }
+
     // ── Exceptions / errors ──────────────────────────────────────────────
 
     /** Thrown when the connection to [MusicService] fails. */
@@ -635,6 +657,9 @@ class MusicController @JvmOverloads constructor(
         safePlayerCommand("shuffle") {
             controller?.let { ctrl ->
                 val enabled = !ctrl.shuffleModeEnabled
+                currentTrack.value?.takeUnless { it.isTransient }?.playbackSource?.let {
+                    rememberContextShuffle(it, enabled)
+                }
                 ctrl.shuffleModeEnabled = enabled
                 _shuffleEnabled.value = enabled
             }
@@ -733,7 +758,7 @@ class MusicController @JvmOverloads constructor(
             }
             // Single inserted items are always enriched (the notification
             // needs their artwork the moment they play).
-            ctrl.addMediaItem(insertAt, buildMediaItem(track, enrichArtwork = true))
+            ctrl.addMediaItem(insertAt, buildMediaItem(track, enrichArtwork = true, manuallyQueued = true))
             manualQueueUris.add(track.uri)
             bumpQueueRevision()
         }
@@ -756,7 +781,7 @@ class MusicController @JvmOverloads constructor(
             } else {
                 (currentIndex + 1 + manualItemsAfterCurrent(ctrl)).coerceAtMost(ctrl.mediaItemCount)
             }
-            ctrl.addMediaItem(insertAt, buildMediaItem(track, enrichArtwork = true))
+            ctrl.addMediaItem(insertAt, buildMediaItem(track, enrichArtwork = true, manuallyQueued = true))
             manualQueueUris.add(track.uri)
             bumpQueueRevision()
         }
@@ -1087,7 +1112,9 @@ class MusicController @JvmOverloads constructor(
         // `play_with_context` resets `user_queue_count` to 0).
         manualQueueUris.clear()
         safePlayerCommand("play") {
-            request.shuffle?.let { ctrl.shuffleModeEnabled = it }
+            val source = request.items[request.startIndex.coerceIn(0, request.items.lastIndex)].playbackSource
+            val shuffle = request.shuffle ?: source?.let { shuffleFor(it) }
+            shuffle?.let { ctrl.shuffleModeEnabled = it }
             request.repeatMode?.let { ctrl.repeatMode = it }
             // Atomic queue replacement: a single `setMediaItems` call (with
             // position reset) replaces the old stop+clear+add sequence.  A
@@ -1138,6 +1165,13 @@ class MusicController @JvmOverloads constructor(
      * Called after every (re)connection so UI state is immediately accurate.
      */
     private fun hydrateState(ctrl: MediaController) {
+        manualQueueUris.clear()
+        for (index in 0 until ctrl.mediaItemCount) {
+            val item = ctrl.getMediaItemAt(index)
+            if (item.mediaMetadata.extras?.getBoolean(METADATA_MANUALLY_QUEUED) == true) {
+                manualQueueUris.add(item.mediaId)
+            }
+        }
         _isConnected.value = true
         _isPlaying.value = ctrl.isPlaying
         _playWhenReady.value = ctrl.playWhenReady
@@ -1242,7 +1276,8 @@ class MusicController @JvmOverloads constructor(
     internal fun buildMediaItem(
         track: MediaTrack,
         enrichArtwork: Boolean = false,
-        playlistId: Long? = null
+        playlistId: Long? = null,
+        manuallyQueued: Boolean = false
     ): MediaItem {
         val extras = Bundle().apply {
             putLong(METADATA_DURATION_MS, track.durationMs)
@@ -1253,6 +1288,7 @@ class MusicController @JvmOverloads constructor(
                 source.name?.let { putString(METADATA_SOURCE_NAME, it) }
             }
             if (track.isTransient) putBoolean(METADATA_TRANSIENT, true)
+            if (manuallyQueued) putBoolean(METADATA_MANUALLY_QUEUED, true)
             // The session's ArtworkEnrichingCallback only loads artworkData
             // for flagged items — keeps notification/lock-screen artwork
             // without reading the whole library into memory per play.
@@ -1416,6 +1452,7 @@ class MusicController @JvmOverloads constructor(
             "com.luno.mobile.playback.SOURCE_CATEGORY"
         internal const val METADATA_SOURCE_NAME =
             "com.luno.mobile.playback.SOURCE_NAME"
+        internal const val METADATA_MANUALLY_QUEUED = "com.luno.mobile.MANUALLY_QUEUED"
         internal const val METADATA_TRANSIENT =
             "com.luno.mobile.playback.TRANSIENT"
         private const val TAG = "MusicController"

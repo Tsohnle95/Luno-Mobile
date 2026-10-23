@@ -17,3 +17,7 @@ data class PlaybackSource(
         name?.trim()?.takeIf { it.isNotEmpty() }
     ).joinToString(" · ").ifBlank { "Player" }
 }
+
+/** Real playlist identity survives renames; virtual collections use their source label. */
+internal fun PlaybackSource.shuffleKey(): String = playlistId?.let { "playlist:$it" }
+    ?: "$category:${name.orEmpty()}"

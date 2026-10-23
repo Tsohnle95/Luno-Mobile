@@ -141,7 +141,7 @@ fun PlaylistDetailScreen(
             kotlinx.coroutines.flow.flowOf(emptyList())
         }
     }.collectAsState(initial = emptyList())
-    val shuffleEnabled by musicController.shuffleEnabled.collectAsState()
+    val contextShuffle by musicController.contextShuffle.collectAsState()
 
     // All-or-nothing first render: hold the screen behind one static
     // placeholder instead of showing the top bar and then the header and
@@ -181,6 +181,8 @@ fun PlaylistDetailScreen(
             playlistId = playbackPlaylistId
         )
     }
+
+    val shuffleEnabled = remember(contextShuffle, playbackSource) { musicController.shuffleFor(playbackSource) }
 
     // In-playlist search: filter the membership by title/artist/album
     // (case-insensitive), then sort the filtered set — the list rows AND
@@ -314,7 +316,7 @@ fun PlaylistDetailScreen(
                         )
                     },
                     onShuffleAll = {
-                        musicController.toggleShuffle()
+                        musicController.setContextShuffle(playbackSource, !shuffleEnabled)
                     },
                     onSearch = { showSearch = !showSearch },
                     searchVisible = showSearch,

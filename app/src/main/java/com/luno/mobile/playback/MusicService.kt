@@ -3,11 +3,16 @@ package com.luno.mobile.playback
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
+import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -17,12 +22,16 @@ import com.luno.mobile.LunoApp
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import java.util.concurrent.Executors
+import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 class MusicService : MediaSessionService() {
 
     companion object {
         const val ACTION_OPEN_PLAYER = "com.luno.mobile.action.OPEN_PLAYER"
         private const val PLAYBACK_PREFS = "playback_restore"
+        private const val KEY_SHUFFLE = "shuffle"
+        private const val KEY_REPEAT = "repeat"
         private const val KEY_URI = "uri"
         private const val KEY_TITLE = "title"
         private const val KEY_ARTIST = "artist"
@@ -39,15 +48,23 @@ class MusicService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
     private val artworkExecutor = Executors.newSingleThreadExecutor()
+    private val queueExecutor = Executors.newSingleThreadExecutor()
+    private lateinit var queueStore: PlaybackQueueStore
+    private var queueDirty = true
+    private var queueRevision = UUID.randomUUID().toString()
+    private var lastCursor: PlaybackCursor? = null
+    private val checkpointHandler = Handler(Looper.getMainLooper())
+    private val periodicCheckpoint = object : Runnable {
+        override fun run() {
+            persistPlayback()
+            checkpointHandler.postDelayed(this, 5_000L)
+        }
+    }
     private val playbackPersistenceListener = object : Player.Listener {
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = persistPlayback()
-        override fun onIsPlayingChanged(isPlaying: Boolean) = persistPlayback()
-        override fun onPlaybackStateChanged(playbackState: Int) = persistPlayback()
-        override fun onPositionDiscontinuity(
-            oldPosition: Player.PositionInfo,
-            newPosition: Player.PositionInfo,
-            reason: Int
-        ) = persistPlayback()
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) { queueDirty = true }
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { queueDirty = true }
+        override fun onRepeatModeChanged(repeatMode: Int) { queueDirty = true }
+        override fun onEvents(player: Player, events: Player.Events) = persistPlayback()
     }
 
     override fun onCreate() {
@@ -64,8 +81,10 @@ class MusicService : MediaSessionService() {
             .build()
 
         val p = player ?: return
+        queueStore = PlaybackQueueStore(this)
         restoreLastPlayback(p)
         p.addListener(playbackPersistenceListener)
+        checkpointHandler.postDelayed(periodicCheckpoint, 5_000L)
 
         val intent = Intent(this, MainActivity::class.java).apply {
             action = ACTION_OPEN_PLAYER
@@ -170,6 +189,7 @@ class MusicService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        checkpointHandler.removeCallbacks(periodicCheckpoint)
         persistPlayback()
         // Release session BEFORE player (Media3 contract: session holds player reference).
         // Fields are nulled immediately so cleanup is idempotent.
@@ -183,53 +203,93 @@ class MusicService : MediaSessionService() {
             player = null
         }
         artworkExecutor.shutdown()
+        queueExecutor.shutdown()
         super.onDestroy()
     }
 
     private fun persistPlayback() {
-        val currentPlayer = player ?: return
-        val item = currentPlayer.currentMediaItem ?: return
-        if (item.mediaMetadata.extras
-                ?.getBoolean(MusicController.METADATA_TRANSIENT) == true
-        ) {
+        val p = player ?: return
+        val previewState = (application as? LunoApp)?.recommendationPreviewManager?.state?.value
+        val temporary = previewState?.discoverMode == true || previewState?.active == true ||
+            (0 until p.mediaItemCount).any {
+                p.getMediaItemAt(it).mediaMetadata.extras?.getBoolean(MusicController.METADATA_TRANSIENT) == true
+            }
+        if (temporary) {
+            // Discover fences the physical queue before a preview plays. Never
+            // replace durable recovery with that one-item/temporary projection.
+            lastCursor?.takeIf { it.playWhenReady }?.copy(playWhenReady = false)?.let { cursor ->
+                lastCursor = cursor
+                enqueuePersistence { queueStore.checkpoint(cursor) }
+            }
+            queueDirty = true
             return
         }
-        val metadata = item.mediaMetadata
-        getSharedPreferences(PLAYBACK_PREFS, MODE_PRIVATE).edit()
-            .putString(KEY_URI, item.mediaId)
-            .putString(KEY_TITLE, metadata.title?.toString().orEmpty())
-            .putString(KEY_ARTIST, metadata.artist?.toString().orEmpty())
-            .putString(KEY_ALBUM, metadata.albumTitle?.toString().orEmpty())
-            .putLong(
-                KEY_DURATION_MS,
-                metadata.extras?.getLong(MusicController.METADATA_DURATION_MS) ?: 0L
+        val cursor = PlaybackCursor(
+            revision = if (queueDirty) UUID.randomUUID().toString() else queueRevision,
+            index = p.currentMediaItemIndex.coerceAtLeast(0),
+            positionMs = p.currentPosition.coerceAtLeast(0L),
+            playWhenReady = p.playWhenReady && p.playbackState != Player.STATE_ENDED
+        )
+        if (queueDirty) {
+            val timeline = p.currentTimeline
+            val order = ArrayList<Int>(p.mediaItemCount)
+            var index = timeline.getFirstWindowIndex(true)
+            while (index != C.INDEX_UNSET && order.size < p.mediaItemCount) {
+                order += index
+                index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, true)
+            }
+            val snapshot = PlaybackQueueSnapshot(
+                (0 until p.mediaItemCount).map { p.getMediaItemAt(it) },
+                order, p.shuffleModeEnabled, p.repeatMode, cursor
             )
-            .putString(KEY_ARTWORK_URI, metadata.artworkUri?.toString())
-            .putString(
-                KEY_SOURCE_CATEGORY,
-                metadata.extras?.getString(MusicController.METADATA_SOURCE_CATEGORY)
-            )
-            .putString(
-                KEY_SOURCE_NAME,
-                metadata.extras?.getString(MusicController.METADATA_SOURCE_NAME)
-            )
-            .putLong(
-                KEY_SOURCE_PLAYLIST_ID,
-                metadata.extras
-                    ?.takeIf { it.containsKey(MusicController.METADATA_PLAYLIST_ID) }
-                    ?.getLong(MusicController.METADATA_PLAYLIST_ID)
-                    ?: 0L
-            )
-            .putLong(KEY_POSITION_MS, currentPlayer.currentPosition.coerceAtLeast(0L))
-            .putBoolean(
-                KEY_PLAY_WHEN_READY,
-                currentPlayer.playWhenReady && currentPlayer.playbackState != Player.STATE_ENDED
-            )
-            .apply()
+            queueDirty = false
+            queueRevision = cursor.revision
+            enqueuePersistence { queueStore.save(snapshot) }
+        } else if (cursor != lastCursor) {
+            enqueuePersistence { queueStore.checkpoint(cursor) }
+        }
+        lastCursor = cursor
     }
 
+    private fun enqueuePersistence(block: () -> Unit) {
+        queueExecutor.execute {
+            try {
+                block()
+            } catch (_: Exception) {
+                Log.w("MusicService", "Could not save playback recovery state")
+                checkpointHandler.post { queueDirty = true }
+            }
+        }
+    }
+
+    // A test seam for deterministic disk completion; production never blocks the UI.
+    internal fun awaitPlaybackPersistence() {
+        if (queueExecutor.isShutdown) {
+            check(queueExecutor.awaitTermination(10, TimeUnit.SECONDS))
+        } else {
+            queueExecutor.submit {}.get(10, TimeUnit.SECONDS)
+        }
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun restoreLastPlayback(currentPlayer: ExoPlayer) {
+        queueStore.read()?.let { snapshot ->
+            queueRevision = snapshot.cursor.revision
+            lastCursor = snapshot.cursor
+            currentPlayer.shuffleModeEnabled = snapshot.shuffle
+            currentPlayer.repeatMode = snapshot.repeat
+            if (snapshot.items.isNotEmpty()) {
+                currentPlayer.setMediaItems(snapshot.items, snapshot.cursor.index, snapshot.cursor.positionMs)
+                currentPlayer.setShuffleOrder(DefaultShuffleOrder(snapshot.shuffleOrder.toIntArray(), 0L))
+                currentPlayer.prepare()
+                currentPlayer.playWhenReady = snapshot.cursor.playWhenReady
+            }
+            return
+        }
         val preferences = getSharedPreferences(PLAYBACK_PREFS, MODE_PRIVATE)
+        currentPlayer.shuffleModeEnabled = preferences.getBoolean(KEY_SHUFFLE, false)
+        currentPlayer.repeatMode = preferences.getInt(KEY_REPEAT, Player.REPEAT_MODE_OFF)
+            .takeIf { it in Player.REPEAT_MODE_OFF..Player.REPEAT_MODE_ALL } ?: Player.REPEAT_MODE_OFF
         val uri = preferences.getString(KEY_URI, null)?.takeIf { it.isNotBlank() } ?: return
         val track = MediaTrack(
             uri = uri,

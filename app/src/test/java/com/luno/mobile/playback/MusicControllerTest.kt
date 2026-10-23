@@ -44,11 +44,99 @@ class MusicControllerTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        context.getSharedPreferences("context_shuffle", Context.MODE_PRIVATE).edit().clear().commit()
         fakeConnector = FakeConnector()
         controller = MusicController(
             context,
             connector = fakeConnector
         )
+    }
+
+    @Test
+    fun `context shuffle survives recreation and playlist rename without leaking to other collections`() {
+        val library = PlaybackSource("Library", "All songs")
+        val playlist = PlaybackSource("Playlist", "First name", 42)
+        controller.setContextShuffle(library, true)
+        controller.setContextShuffle(playlist, true)
+        controller.setContextShuffle(library, false)
+        controller.release()
+        val recreated = MusicController(context, connector = fakeConnector)
+        try {
+            assertThat(recreated.shuffleFor(library)).isFalse()
+            assertThat(recreated.shuffleFor(playlist.copy(name = "Renamed"))).isTrue()
+            assertThat(recreated.shuffleFor(playlist.copy(playlistId = 43))).isFalse()
+        } finally {
+            recreated.release()
+        }
+    }
+
+    @Test
+    fun `full player shuffle saves active context and survives a new controller`() {
+        val source = PlaybackSource("Library", "All songs")
+        val player = ExoPlayer.Builder(context).build()
+        val session = MediaSession.Builder(context, player).build()
+        val connectedController = MusicController(context,
+            connector = MusicController.AsyncConnector { ctx -> MediaController.Builder(ctx, session.token).buildAsync() })
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            player.setMediaItem(connectedController.buildMediaItem(
+                MediaTrack(uri = "file:///saved.mp3", title = "Saved", artist = "Artist", playbackSource = source)))
+            shadowOf(Looper.getMainLooper()).idle()
+            connectedController.toggleShuffle()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.shuffleModeEnabled).isTrue()
+            assertThat(player.playWhenReady).isFalse()
+            val otherSource = PlaybackSource("Playlist", "Other", 43)
+            connectedController.play(MediaTrack(uri = "file:///other.mp3", title = "Other", artist = "Artist", playbackSource = otherSource))
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.shuffleModeEnabled).isFalse()
+            val tracks = listOf("first", "selected", "last").map {
+                MediaTrack(uri = "file:///$it.mp3", title = it, artist = "Artist", playbackSource = source)
+            }
+            connectedController.play(tracks, startIndex = 1)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat(player.shuffleModeEnabled).isTrue()
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo("file:///selected.mp3")
+            val recreated = MusicController(context, connector = fakeConnector)
+            try {
+                assertThat(recreated.shuffleFor(source)).isTrue()
+            } finally {
+                recreated.release()
+            }
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun `manual queue membership hydrates so later additions stay after existing queued items`() {
+        val player = ExoPlayer.Builder(context).build()
+        val seed = MediaTrack(uri = "file:///seed.mp3", title = "Seed", artist = "Artist")
+        player.setMediaItems(listOf(
+            controller.buildMediaItem(seed),
+            controller.buildMediaItem(seed.copy(uri = "file:///manual.mp3"), manuallyQueued = true),
+            controller.buildMediaItem(seed.copy(uri = "file:///tail.mp3"))
+        ))
+        val session = MediaSession.Builder(context, player).build()
+        val connectedController = MusicController(context,
+            connector = MusicController.AsyncConnector { ctx -> MediaController.Builder(ctx, session.token).buildAsync() })
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            connectedController.addToQueue(seed.copy(uri = "file:///new.mp3"))
+            shadowOf(Looper.getMainLooper()).idle()
+            assertThat((0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId })
+                .containsExactly("file:///seed.mp3", "file:///manual.mp3", "file:///new.mp3", "file:///tail.mp3").inOrder()
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
     }
 
     // ── Pending-play contract (pre-connection) ──────────────────────────

@@ -85,7 +85,8 @@ WorkManager input IDs/tags, Android intents/content URIs and transfer JSON.
 
 App-process imports/previews survive navigation, not process death. Durable
 download execution belongs to WorkManager; startup reconciliation bridges its
-state back to Room. Service restore and recents use private preferences. Keep
+state back to Room. Service queue recovery uses private atomic snapshots and generation-bound cursor
+preferences; recents use separate private preferences. Keep
 these distinct recovery owners when changing lifetimes.
 
 App updates use a separate private transaction/receipt store, unique WorkManager

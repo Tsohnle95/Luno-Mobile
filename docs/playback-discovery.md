@@ -24,8 +24,27 @@ release must not activate playback.
 
 [MusicService](../app/src/main/java/com/luno/mobile/playback/MusicService.kt)
 owns ExoPlayer/MediaSession, audio focus/noisy handling, notifications and private
-preference restoration of the last persistent item/position/playWhenReady.
-Release session before player, then shut down artwork executor. This service
+recovery of the full persistent Playing Next queue, current index/position,
+play intent and shuffle/repeat modes. [PlaybackQueueStore](../app/src/main/java/com/luno/mobile/playback/PlaybackQueueStore.kt)
+writes versioned atomic queue snapshots in app-private files on a serialized
+worker. Original order, duplicate occurrences, exact shuffled traversal, source
+metadata and manual queue membership survive restart; artwork bytes and transient
+preview items are not serialized. Lightweight cursor preferences are tied to a
+queue generation, so an interrupted update cannot apply an index to a different
+queue. Queue edits/mode changes save a new snapshot; seeks, pauses and task
+removal checkpoint position, with five-second checkpoints during playback.
+Abrupt process termination can lose the last five seconds plus pending disk work.
+An explicitly empty queue stays empty. Corrupt/unsupported snapshots fall back to
+the legacy single-item preferences; unreadable track URIs remain subject to the
+existing playback error path. Snapshots over 32 MiB are rejected, retaining the
+previous recovery point.
+
+Active Discover/preview sessions preserve the last persistent physical queue
+instead of saving their temporary projections; recovery resumes that saved queue
+paused. Discover preparation itself remains process-local. Restore installs items
+and shuffle order before attaching the session/controller, avoiding new play
+counts. Release session before player, then shut down artwork and persistence
+executors. This service
 has a lifecycle independent of the Activity; its exported surface and permissions
 live in the [manifest](../app/src/main/AndroidManifest.xml). Inspect session
 callback authorization/command handling when changing external control behavior.
@@ -89,6 +108,16 @@ owns transport-button icons/toggling, so controls stay aligned while buffering o
 when playback is controlled from the notification. Shuffle is a mode/queue
 control only: toggling it must never start playback from idle or jump the
 current item; audio starts only from an explicit play or track tap.
+Library and playlist shuffle choices live in private `context_shuffle`
+preferences exposed by `MusicController.contextShuffle`, rather than screen
+state. Real playlists are keyed by ID (so renaming preserves the choice), and
+virtual collections by source category/name. A collection's control updates its
+saved preference and the session only when that collection is active. Full-player
+shuffle toggles also update the active persistent source's preference. Starting
+that collection, including tapping a specific song, applies its saved choice;
+tapping a song retains that song as the start item. Temporary preview mode
+commands do not overwrite collection preferences.
+
 Playing Next rows are interactive: tapping one calls `playQueueItem` with its
 playback-order index, which seeks to the matching raw item and starts it.
 When the app returns to the foreground, `MainActivity.onStart` calls
@@ -128,8 +157,14 @@ tracks do not expose an enabled membership action.
 
 - [MusicControllerTest](../app/src/test/java/com/luno/mobile/playback/MusicControllerTest.kt):
   pending requests/generations/release, metadata, context/queue seams, errors,
-  history restoration, session play-intent toggling, and retaining the current
+  history restoration, independent collection shuffle persistence/rename and full-player synchronization, session play-intent toggling, and retaining the current
   item while a deferred context is prepared.
+- [MusicServiceTest](../app/src/test/java/com/luno/mobile/playback/MusicServiceTest.kt):
+  service recreation restores full queues with duplicate items, exact shuffle
+  traversal, position/modes, edits/clearing, preview isolation and legacy fallback.
+- [PlaybackQueueStoreTest](../app/src/test/java/com/luno/mobile/playback/PlaybackQueueStoreTest.kt):
+  metadata/manual membership, generation-bound cursor updates, corrupt data,
+  unsupported versions and invalid shuffle permutations.
 - [RecommendationPreviewManagerTest](../app/src/test/java/com/luno/mobile/playback/RecommendationPreviewManagerTest.kt):
   handoff/session Next/page load, windows, prepared retention/back navigation,
   save deduplication/completion, timeout spinner clearing and failure retention

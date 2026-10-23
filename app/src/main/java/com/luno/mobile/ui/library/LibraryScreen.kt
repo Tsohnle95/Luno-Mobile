@@ -79,7 +79,9 @@ fun LibraryScreen(
     val downloads by libraryData.downloads.collectAsState()
     val libraryLoaded by libraryData.loaded.collectAsState()
     var query by rememberSaveable { mutableStateOf("") }
-    var libraryShuffle by rememberSaveable { mutableStateOf(false) }
+    val contextShuffle by musicController.contextShuffle.collectAsState()
+    val librarySource = PlaybackSource("Library", "All songs")
+    val libraryShuffle = remember(contextShuffle) { musicController.shuffleFor(librarySource) }
     var filter by rememberSaveable { mutableStateOf(LibraryFilter.PLAYLISTS) }
     var gridView by rememberSaveable { mutableStateOf(false) }
     val showPlaylists = filter == LibraryFilter.PLAYLISTS
@@ -325,7 +327,7 @@ fun LibraryScreen(
                 onSelectAll = { setAllVisibleSelected(true) },
                 libraryShuffle = libraryShuffle,
                 libraryCanPlay = allTracks.isNotEmpty(),
-                onToggleLibraryShuffle = { libraryShuffle = !libraryShuffle },
+                onToggleLibraryShuffle = { musicController.setContextShuffle(librarySource, !libraryShuffle) },
                 onPlayLibrary = {
                     onPlay(allTracks.sortedByMode(sortMode).map { it.toMediaTrack() }, 0, libraryShuffle)
                 }
@@ -433,10 +435,10 @@ fun LibraryScreen(
                                 // (filtered) context — next/prev walk the
                                 // visible list, like the desktop.
                                 val index = sortedTracks.indexOfFirst { it.uri == track.uri }
-                                onPlay(
+                                musicController.play(
                                     mediaTracks,
                                     index.coerceAtLeast(0),
-                                    false
+                                    shuffle = libraryShuffle
                                 )
                             }
                         },

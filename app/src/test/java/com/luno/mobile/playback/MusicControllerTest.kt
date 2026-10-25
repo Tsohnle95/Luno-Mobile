@@ -5,6 +5,7 @@ import android.os.Looper
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
@@ -296,6 +297,80 @@ class MusicControllerTest {
 
             assertThat(player.mediaItemCount).isEqualTo(1)
             assertThat(player.currentMediaItem?.mediaId).isEqualTo(currentUri)
+        } finally {
+            connectedController.release()
+            session.release()
+            player.release()
+        }
+    }
+
+    @Test
+    fun `discovery fencing a large queue bounds timeline rebuilds and retains playback`() {
+        assertLargeQueueMutationPreservesPlayback(restore = false)
+    }
+
+    @Test
+    fun `restoring discovery from a large queue bounds timeline rebuilds and retains playback`() {
+        assertLargeQueueMutationPreservesPlayback(restore = true)
+    }
+
+    @Test
+    fun `discovery fencing preserves paused playback and shuffle at either queue edge`() {
+        for (index in listOf(0, 1_023)) {
+            assertLargeQueueMutationPreservesPlayback(restore = false, selectedIndex = index, playing = false)
+        }
+    }
+
+    private fun assertLargeQueueMutationPreservesPlayback(
+        restore: Boolean,
+        selectedIndex: Int = 471,
+        playing: Boolean = true
+    ) {
+        // Each timeline rebuild also copies the current artwork. Small final-state
+        // tests missed the quadratic allocation storm on a real library queue.
+        val tracks = (0 until 1_024).map { track("file:///large-$it.m4a") }
+        val player = ExoPlayer.Builder(context).build()
+        player.setMediaItems(tracks.map { controller.buildMediaItem(it) }, selectedIndex, 12_345L)
+        player.shuffleModeEnabled = true
+        player.playWhenReady = playing
+        val session = MediaSession.Builder(context, player).build()
+        val connectedController = MusicController(context,
+            connector = MusicController.AsyncConnector { ctx ->
+                MediaController.Builder(ctx, session.token).buildAsync()
+            })
+        try {
+            val connected = CountDownLatch(1)
+            connectedController.initialize { connected.countDown() }
+            assertThat(connected.await(5, TimeUnit.SECONDS)).isTrue()
+            var timelineChanges = 0
+            var itemTransitions = 0
+            player.addListener(object : Player.Listener {
+                override fun onTimelineChanged(timeline: Timeline, reason: Int) { timelineChanges++ }
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) { itemTransitions++ }
+            })
+            val currentUid = player.currentTimeline.getWindow(selectedIndex, Timeline.Window()).uid
+            if (restore) {
+                assertThat(connectedController.restoreQueueAroundCurrent(
+                    tracks, tracks[selectedIndex].uri, selectedIndex, resumeAtNextIfEnded = false
+                )).isTrue()
+            } else {
+                assertThat(connectedController.retainCurrentItemOnly()).isTrue()
+            }
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertThat(timelineChanges).isAtMost(if (restore) 4 else 2)
+            assertThat(itemTransitions).isEqualTo(0)
+            assertThat(player.currentMediaItem?.mediaId).isEqualTo(tracks[selectedIndex].uri)
+            assertThat(player.currentTimeline.getWindow(player.currentMediaItemIndex, Timeline.Window()).uid)
+                .isEqualTo(currentUid)
+            assertThat(player.currentPosition).isEqualTo(12_345L)
+            assertThat(player.playWhenReady).isEqualTo(playing)
+            assertThat(player.shuffleModeEnabled).isTrue()
+            assertThat(player.mediaItemCount).isEqualTo(if (restore) tracks.size else 1)
+            if (restore) {
+                assertThat((0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId })
+                    .containsExactlyElementsIn(tracks.map { it.uri }).inOrder()
+            }
         } finally {
             connectedController.release()
             session.release()

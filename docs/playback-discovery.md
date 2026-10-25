@@ -100,7 +100,12 @@ track; a prepared recommendation becomes its next item. If the current item ends
 first, the first ready preview resumes from the ended state; a stop/pause must
 not be mistaken for natural end. If Discover is disabled or previews fail before
 one plays, restore the saved physical queue around the still-playing seed without
-restarting it. A newer explicit play request supersedes that saved queue snapshot.
+restarting it. Fencing and restoration remove the suffix and prefix in at most
+two Media3 range mutations, preserving the current media source, playback position
+and play intent. Removing a large library one item at a time rebuilds the timeline
+and copies current artwork repeatedly, causing quadratic allocation and OOM; do
+not replace these bounded operations with per-item commands. A newer explicit play
+request supersedes that saved queue snapshot.
 
 `MusicController.isPlaying` describes actual playback for progress/preview
 animation. Its separate `playWhenReady` flow mirrors MediaSession play intent and
@@ -158,7 +163,9 @@ tracks do not expose an enabled membership action.
 - [MusicControllerTest](../app/src/test/java/com/luno/mobile/playback/MusicControllerTest.kt):
   pending requests/generations/release, metadata, context/queue seams, errors,
   history restoration, independent collection shuffle persistence/rename and full-player synchronization, session play-intent toggling, and retaining the current
-  item while a deferred context is prepared.
+  item while a deferred context is prepared. Library-sized fencing/restoration
+  tests bound real session timeline rebuilds and retain source identity, position,
+  play intent and shuffle, including paused playback at either queue edge.
 - [MusicServiceTest](../app/src/test/java/com/luno/mobile/playback/MusicServiceTest.kt):
   service recreation restores full queues with duplicate items, exact shuffle
   traversal, position/modes, edits/clearing, preview isolation and legacy fallback.

@@ -451,6 +451,23 @@ class MusicController @JvmOverloads constructor(
             }
         }
 
+    private fun trimQueueAroundCurrentItem(player: Player, currentIndex: Int): Boolean {
+        val count = player.mediaItemCount
+        if (count <= 1) return false
+        val removedUris = (0 until count).asSequence()
+            .filter { it != currentIndex }
+            .map { player.getMediaItemAt(it).mediaId }
+            .toSet()
+        // A per-item removal rebuilds Media3's entire timeline and copies current
+        // artwork each time, exhausting the heap on library-sized queues. Keep
+        // the current source/position intact with at most two range mutations;
+        // remove the suffix first so the prefix indices remain valid.
+        if (currentIndex + 1 < count) player.removeMediaItems(currentIndex + 1, count)
+        if (currentIndex > 0) player.removeMediaItems(0, currentIndex)
+        manualQueueUris.removeAll(removedUris)
+        return true
+    }
+
     private fun retainCurrentItemOnly(
         expectedCurrentUri: String?,
         expectedPlayRequestRevision: Long?
@@ -474,13 +491,7 @@ class MusicController @JvmOverloads constructor(
                 ) {
                     return@safePlayerCommand
                 }
-                val removedIndices = (0 until ctrl.mediaItemCount)
-                    .filter { it != currentRawIndex }
-                    .sortedDescending()
-                if (removedIndices.isNotEmpty()) {
-                    val removedUris = removedIndices.map { ctrl.getMediaItemAt(it).mediaId }.toSet()
-                    removedIndices.forEach(ctrl::removeMediaItem)
-                    manualQueueUris.removeAll(removedUris)
+                if (trimQueueAroundCurrentItem(ctrl, currentRawIndex)) {
                     bumpQueueRevision()
                 }
                 retained = true
@@ -834,14 +845,7 @@ class MusicController @JvmOverloads constructor(
                 return@safePlayerCommand
             }
 
-            val removedIndices = (0 until ctrl.mediaItemCount)
-                .filter { it != actualCurrentIndex }
-                .sortedDescending()
-            if (removedIndices.isNotEmpty()) {
-                val removedUris = removedIndices.map { ctrl.getMediaItemAt(it).mediaId }.toSet()
-                removedIndices.forEach(ctrl::removeMediaItem)
-                manualQueueUris.removeAll(removedUris)
-            }
+            val trimmed = trimQueueAroundCurrentItem(ctrl, actualCurrentIndex)
 
             val beforeCurrent = tracks.take(currentIndex).mapIndexed { index, track ->
                 buildMediaItem(
@@ -861,7 +865,7 @@ class MusicController @JvmOverloads constructor(
             if (afterCurrent.isNotEmpty()) {
                 ctrl.addMediaItems(currentIndex + 1, afterCurrent)
             }
-            if (removedIndices.isNotEmpty() || beforeCurrent.isNotEmpty() ||
+            if (trimmed || beforeCurrent.isNotEmpty() ||
                 afterCurrent.isNotEmpty()
             ) {
                 bumpQueueRevision()
